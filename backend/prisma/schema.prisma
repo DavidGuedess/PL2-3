@@ -1,0 +1,130 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum ShiftType {
+  MORNING
+  AFTERNOON
+  NIGHT
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RequestType {
+  SWAP
+  DAY_OFF
+  VACATION
+}
+
+model User {
+  id             Int      @id @default(autoincrement())
+  employeeNumber String   @unique @map("employee_number")
+  fullName       String   @map("full_name")
+  email          String   @unique
+  passwordHash   String   @map("password_hash")
+  role           Role     @default(EMPLOYEE)
+  department     String?
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  assignedShifts     ShiftAssignment[] @relation("AssignedEmployee")
+  managedAssignments ShiftAssignment[] @relation("AssignedByManager")
+  sentRequests       ShiftRequest[]    @relation("Requester")
+  reviewedRequests   ShiftRequest[]    @relation("Reviewer")
+  targetedRequests   ShiftRequest[]    @relation("TargetEmployee")
+  attendance         AttendanceRecord[]
+
+  @@map("users")
+}
+
+model ShiftTemplate {
+  id          Int       @id @default(autoincrement())
+  name        String
+  shiftType   ShiftType @map("shift_type")
+  startTime   String    @map("start_time")
+  endTime     String    @map("end_time")
+  description String?
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  assignments ShiftAssignment[]
+
+  @@map("shift_templates")
+}
+
+model ShiftAssignment {
+  id        Int      @id @default(autoincrement())
+  date      DateTime @db.Date
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  employeeId      Int  @map("employee_id")
+  employee        User @relation("AssignedEmployee", fields: [employeeId], references: [id])
+
+  shiftTemplateId Int           @map("shift_template_id")
+  shiftTemplate   ShiftTemplate @relation(fields: [shiftTemplateId], references: [id])
+
+  assignedById Int?  @map("assigned_by_id")
+  assignedBy   User? @relation("AssignedByManager", fields: [assignedById], references: [id])
+
+  swapRequests ShiftRequest[]
+
+  @@unique([employeeId, date])
+  @@map("shift_assignments")
+}
+
+model ShiftRequest {
+  id            Int           @id @default(autoincrement())
+  requestType   RequestType   @map("request_type")
+  status        RequestStatus @default(PENDING)
+  startDate     DateTime?     @db.Date @map("start_date")
+  endDate       DateTime?     @db.Date @map("end_date")
+  justification String?
+  managerComment String?      @map("manager_comment")
+  reviewedAt    DateTime?     @map("reviewed_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  requesterId Int  @map("requester_id")
+  requester   User @relation("Requester", fields: [requesterId], references: [id])
+
+  reviewerId Int?  @map("reviewer_id")
+  reviewer   User? @relation("Reviewer", fields: [reviewerId], references: [id])
+
+  targetEmployeeId Int?  @map("target_employee_id")
+  targetEmployee   User? @relation("TargetEmployee", fields: [targetEmployeeId], references: [id])
+
+  originalAssignmentId Int?             @map("original_assignment_id")
+  originalAssignment   ShiftAssignment? @relation(fields: [originalAssignmentId], references: [id])
+
+  @@map("shift_requests")
+}
+
+model AttendanceRecord {
+  id         Int       @id @default(autoincrement())
+  date       DateTime  @db.Date
+  clockIn    DateTime  @map("clock_in")
+  clockOut   DateTime? @map("clock_out")
+  notes      String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  employeeId Int  @map("employee_id")
+  employee   User @relation(fields: [employeeId], references: [id])
+
+  @@map("attendance_records")
+}

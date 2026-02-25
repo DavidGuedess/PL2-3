@@ -1,0 +1,25 @@
+# Environment
+.env
+.env.local
+
+# Node
+node_modules/
+dist/
+build/
+.cache/
+
+# Prisma
+*.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
