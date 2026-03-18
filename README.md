@@ -96,3 +96,9 @@ Implemented basic user management:
 Notes:
 - Data is currently stored in-memory (temporary, resets on server restart)
 - UUIDs are used for unique user identification
+
+novas instalações
+- npm install uuid@8
+
+- npm install --save-dev jest ts-jest @types/jest supertest @types/supertest
+- npm install --save-dev @types/jest
