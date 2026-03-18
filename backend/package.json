@@ -5,25 +5,28 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "test": "echo \"No tests yet\" && exit 0",
-    "db:seed": "tsx src/prisma/seed.ts"
+    "db:seed": "tsx src/prisma/seed.ts",
+    "start": "node dist/index.ts "
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "express": "^4.21.0",
     "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
     "cors": "^2.8.5",
-    "morgan": "^1.10.0"
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^22.7.5",
+    "@types/uuid": "^10.0.0",
     "prisma": "^5.22.0",
     "tsx": "^4.19.1",
-    "typescript": "^5.6.3",
-    "@types/express": "^5.0.0",
-    "@types/bcryptjs": "^2.4.6",
-    "@types/jsonwebtoken": "^9.0.7",
-    "@types/cors": "^2.8.17",
-    "@types/morgan": "^1.9.9",
-    "@types/node": "^22.7.5"
+    "typescript": "^5.6.3"
   }
 }

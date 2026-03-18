@@ -83,3 +83,16 @@ docker-compose exec backend npx prisma migrate dev --name nome-da-migracao
 # Ver base de dados visualmente
 docker-compose exec backend npx prisma studio
 ```
+
+# SCRUM-55 Gestão básica de utilizadores## Users API (Initial Setup)
+
+Implemented basic user management:
+
+- Seeded initial users (in-memory storage)
+- Created endpoint to list users (GET /users)
+- Created endpoint to create users (POST /users)
+- Implemented user deactivation (PATCH /users/:id/deactivate)
+
+Notes:
+- Data is currently stored in-memory (temporary, resets on server restart)
+- UUIDs are used for unique user identification
