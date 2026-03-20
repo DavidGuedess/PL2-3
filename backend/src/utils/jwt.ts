@@ -15,3 +15,8 @@ export const generateToken = (payload: TokenPayload): string => {
 export const verifyToken = (token: string): TokenPayload => {
   return jwt.verify(token, JWT_SECRET) as TokenPayload
 }
+
+export const getTokenExpiration = (token: string): Date => {
+  const decoded = jwt.decode(token) as { exp: number }
+  return new Date(decoded.exp * 1000)
+}
