@@ -1,64 +1,60 @@
 import { Router, Request, Response } from 'express'
-import { v4 as uuidv4 } from 'uuid'
 import { users } from '../data/users'
-import { User, UserRole } from '../types/user'
+import { User, UserRole, UserCategory, UserPublic } from '../types/user'
 
 const router = Router()
 
+const toPublic = (user: User): UserPublic => {
+  const { passwordHash: _omit, ...publicUser } = user
+  return publicUser
+}
+
 router.get('/', (_req: Request, res: Response) => {
-  res.json(users)
+  res.json(users.map(toPublic))
 })
 
 router.post('/', (req: Request, res: Response) => {
-  const { fullName, email, employeeNumber, role } = req.body
+  const { name, email, employeeNumber, role, category } = req.body
 
-  if (!fullName || !email || !employeeNumber || !role) {
+  if (!name || !email || !employeeNumber || !role || !category) {
     return res.status(400).json({
-      message: 'fullName, email, employeeNumber and role are required'
+      message: 'name, email, employeeNumber, role and category are required'
     })
   }
 
   const validRoles: UserRole[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
-
   if (!validRoles.includes(role)) {
-    return res.status(400).json({
-      message: 'Invalid role'
-    })
+    return res.status(400).json({ message: 'Invalid role' })
   }
 
-  const emailAlreadyExists = users.find(function (user) {
-    return user.email === email
-  })
-
-  if (emailAlreadyExists) {
-    return res.status(409).json({
-      message: 'Email already exists'
-    })
+  const validCategories: UserCategory[] = ['VETERINARIAN', 'NURSE', 'OPERATIONAL', 'ADMINISTRATIVE']
+  if (!validCategories.includes(category)) {
+    return res.status(400).json({ message: 'Invalid category' })
   }
 
-  const employeeNumberAlreadyExists = users.find(function (user) {
-    return user.employeeNumber === employeeNumber
-  })
+  if (users.find(u => u.email === email)) {
+    return res.status(409).json({ message: 'Email already exists' })
+  }
 
-  if (employeeNumberAlreadyExists) {
-    return res.status(409).json({
-      message: 'Employee number already exists'
-    })
+  if (users.find(u => u.employeeNumber === employeeNumber)) {
+    return res.status(409).json({ message: 'Employee number already exists' })
   }
 
   const newUser: User = {
-    id: uuidv4(),
-    fullName: fullName,
-    email: email,
-    employeeNumber: employeeNumber,
+    id: users.length + 1,
+    employeeNumber,
+    name,
+    email,
+    passwordHash: '',
     role: role as UserRole,
-    isActive: true,
-    createdAt: new Date().toISOString()
+    category: category as UserCategory,
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
   }
 
   users.push(newUser)
-
-  res.status(201).json(newUser)
+  res.status(201).json(toPublic(newUser))
 })
 
 export default router
