@@ -125,3 +125,17 @@ Alinhamento dos tipos TypeScript com o schema Prisma:
 | active | Boolean | default true |
 | createdAt | DateTime | auto |
 | updatedAt | DateTime | auto |
+
+---
+
+### SCRUM-98 — Migration Prisma + Seed inicial (Sprint 2, subtask 1.2)
+
+- Migration `20260313114044_init` já incluía os campos `role` e `category` — verificada e confirmada
+- Criado `backend/src/prisma/seed.ts` com 3 utilizadores iniciais (Admin, Manager, Employee)
+- Passwords encriptadas com bcrypt
+- Seed usa `upsert` — pode ser re-executado sem criar duplicados
+
+Para correr o seed:
+```bash
+docker-compose exec backend npm run db:seed
+```
