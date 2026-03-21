@@ -4,9 +4,10 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "test": "echo \"No tests yet\" && exit 0",
+    "test": "jest",
     "db:seed": "tsx src/prisma/seed.ts",
-    "start": "node dist/index.ts "
+    "start": "node dist/index.ts ",
+    "type": "module"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -15,7 +16,7 @@
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
-    "uuid": "^13.0.0"
+    "uuid": "^8.3.2"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -24,7 +25,6 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/morgan": "^1.9.9",
     "@types/node": "^22.7.5",
-    "@types/uuid": "^10.0.0",
     "prisma": "^5.22.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3"
