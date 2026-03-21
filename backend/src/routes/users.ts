@@ -1,17 +1,21 @@
 import { Router, Request, Response } from 'express'
-import { v4 as uuidv4 } from 'uuid'
 import { users } from '../data/users'
-import { User, UserRole } from '../types/user'
+import { User, UserRole, UserCategory, UserPublic } from '../types/user'
 
 
 const router = Router()
 
+const toPublic = (user: User): UserPublic => {
+  const { passwordHash: _omit, ...publicUser } = user
+  return publicUser
+}
+
 router.get('/', (_req: Request, res: Response) => {
-  res.json(users)
+  res.json(users.map(toPublic))
 })
 
 router.post('/', (req: Request, res: Response) => {
-  const { fullName, email, employeeNumber, role } = req.body
+  const { name, email, employeeNumber, role, category } = req.body
 
   const validRoles: UserRole[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -58,10 +62,8 @@ router.post('/', (req: Request, res: Response) => {
     return user.employeeNumber === normalizedEmployeeNumber
   })
 
-  if (employeeNumberAlreadyExists) {
-    return res.status(409).json({
-      message: 'Employee number already exists'
-    })
+  if (users.find(u => u.employeeNumber === employeeNumber)) {
+    return res.status(409).json({ message: 'Employee number already exists' })
   }
 
   const newUser: User = {
@@ -70,8 +72,10 @@ router.post('/', (req: Request, res: Response) => {
     email: normalizedEmail,
     employeeNumber: normalizedEmployeeNumber,
     role: role as UserRole,
-    isActive: true,
-    createdAt: new Date().toISOString()
+    category: category as UserCategory,
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
   }
 
   users.push(newUser)

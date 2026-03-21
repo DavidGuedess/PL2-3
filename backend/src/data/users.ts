@@ -1,34 +1,40 @@
 import { User } from '../types/user'
 
-import { v4 as uuidv4 } from 'uuid'
-
-
 export const users: User[] = [
   {
-    id: uuidv4(),
-    fullName: 'Admin User',
-    email: 'admin@miaw.com',
+    id: 1,
     employeeNumber: 'ADMIN001',
+    name: 'Admin User',
+    email: 'admin@miaw.com',
+    passwordHash: '',
     role: 'ADMIN',
-    isActive: true,
-    createdAt: new Date().toISOString()
+    category: 'ADMINISTRATIVE',
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
   },
   {
-    id: uuidv4(),
-    fullName: 'Manager User',
-    email: 'manager@miaw.com',
+    id: 2,
     employeeNumber: 'MAN001',
+    name: 'Manager User',
+    email: 'manager@miaw.com',
+    passwordHash: '',
     role: 'MANAGER',
-    isActive: true,
-    createdAt: new Date().toISOString()
+    category: 'ADMINISTRATIVE',
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
   },
   {
-    id: uuidv4(),
-    fullName: 'Employee User',
-    email: 'employee@miaw.com',
+    id: 3,
     employeeNumber: 'EMP001',
+    name: 'Employee User',
+    email: 'employee@miaw.com',
+    passwordHash: '',
     role: 'EMPLOYEE',
-    isActive: true,
-    createdAt: new Date().toISOString()
+    category: 'VETERINARIAN',
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
   }
 ]
