@@ -1,8 +1,6 @@
 module.exports = {
-  preset: 'ts-jest/presets/default-esm',
+  preset: 'ts-jest',
   testEnvironment: 'node',
-  extensionsToTreatAsEsm: ['.ts'],
-  transform: {
-    '^.+\\.ts$': ['ts-jest', { useESM: true }]
-  }
+  roots: ['<rootDir>/src/tests'],
+  testMatch: ['**/*.test.ts'],
 }
