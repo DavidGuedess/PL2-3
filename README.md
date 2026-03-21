@@ -44,6 +44,8 @@ docker-compose exec backend npm run db:seed
 
 O backend fica disponível em `http://localhost:3001`.
 
+A documentação interativa da API (Swagger UI) está disponível em `http://localhost:3001/api-docs`.
+
 ---
 
 ## Como desenvolver
@@ -148,3 +150,17 @@ Para correr o seed:
 ```bash
 docker-compose exec backend npm run db:seed
 ```
+
+---
+
+### SCRUM-61 — CI, Swagger e documentação de endpoints (Sprint 2)
+
+- Pipeline CI (GitHub Actions) configurado para correr em qualquer branch (push e pull request)
+- Instalado `swagger-jsdoc` + `swagger-ui-express`
+- Documentação interativa disponível em `http://localhost:3001/api-docs`
+- Todos os endpoints documentados com OpenAPI 3.0:
+  - `GET /health`
+  - `GET /users`
+  - `POST /users`
+  - `POST /api/auth/login`
+  - `POST /api/auth/logout`

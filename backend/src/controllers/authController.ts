@@ -55,44 +55,6 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   });
 };
 
-export const logout = async (req: Request, res: Response): Promise<void> => {
-  const token = req.token;
-
-  if (!token) {
-    res.status(400).json({ error: 'Token não encontrado' });
-    return;
-  }
-
-  const expiresAt = getTokenExpiration(token);
-  await addToBlacklist(token, expiresAt);
-
-  res.status(200).json({ message: 'Logout efetuado com sucesso' });
-};
-
-export const refresh = async (req: Request, res: Response): Promise<void> => {
-  const { refreshToken } = req.body;
-
-  if (!refreshToken) {
-    res.status(400).json({ error: 'Refresh token obrigatório' });
-    return;
-  }
-
-  const tokenData = await findRefreshToken(refreshToken);
-
-  if (!tokenData || tokenData.expiresAt < new Date()) {
-    res.status(401).json({ error: 'Refresh token inválido ou expirado' });
-    return;
-  }
-
-  if (!tokenData.user.active) {
-    res.status(401).json({ error: 'Utilizador inativo' });
-    return;
-  }
-
-  const accessToken = generateAccessToken({
-    userId: tokenData.user.id,
-    email: tokenData.user.email
-  });
-
-  res.status(200).json({ accessToken });
+export const logout = async (_req: Request, res: Response): Promise<void> => {
+  res.status(200).json({ message: 'Logout successful' });
 };
