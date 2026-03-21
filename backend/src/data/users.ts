@@ -10,6 +10,9 @@ export const users: User[] = [
     email: 'admin@miaw.com',
     employeeNumber: 'ADMIN001',
     role: 'ADMIN',
+    professionalCategory: 'FILLER1',
+    contact: '123456789',
+    password: 'Password',
     isActive: true,
     createdAt: new Date().toISOString()
   },
@@ -19,6 +22,9 @@ export const users: User[] = [
     email: 'manager@miaw.com',
     employeeNumber: 'MAN001',
     role: 'MANAGER',
+    professionalCategory: 'FILLER2',
+    contact: '123456789',
+    password: 'Password',
     isActive: true,
     createdAt: new Date().toISOString()
   },
@@ -28,6 +34,9 @@ export const users: User[] = [
     email: 'employee@miaw.com',
     employeeNumber: 'EMP001',
     role: 'EMPLOYEE',
+    professionalCategory: 'FILLER3',
+    contact: '123456789',
+    password: 'Password',
     isActive: true,
     createdAt: new Date().toISOString()
   }
