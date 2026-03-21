@@ -3,8 +3,8 @@ import swaggerUi from 'swagger-ui-express'
 import usersRoutes from './routes/users'
 import authRoutes from './routes/auth'
 import { swaggerSpec } from './swagger'
+import app from './app'
 
-const app = express()
 const PORT = process.env.PORT || 3001
 
 app.use(express.json())

@@ -6,7 +6,8 @@
     "build": "tsc",
     "test": "jest",
     "db:seed": "tsx src/prisma/seed.ts",
-    "start": "node dist/index.ts "
+    "start": "node dist/index.ts ",
+    "type": "module"
   },
   "jest": {
     "preset": "ts-jest",
@@ -24,7 +25,7 @@
     "morgan": "^1.10.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "uuid": "^13.0.0"
+    "uuid": "^8.3.2"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

@@ -137,6 +137,15 @@ Alinhamento dos tipos TypeScript com o schema Prisma:
 - Passwords encriptadas com bcrypt
 - Seed usa `upsert` — pode ser re-executado sem criar duplicados
 
+Notes:
+- Data is currently stored in-memory (temporary, resets on server restart)
+- UUIDs are used for unique user identification
+
+novas instalações
+- npm install uuid@8
+
+- npm install --save-dev jest ts-jest @types/jest supertest @types/supertest
+- npm install --save-dev @types/jest
 Para correr o seed:
 ```bash
 docker-compose exec backend npm run db:seed
