@@ -44,6 +44,8 @@ docker-compose exec backend npm run db:seed
 
 O backend fica disponível em `http://localhost:3001`.
 
+A documentação interativa da API (Swagger UI) está disponível em `http://localhost:3001/api-docs`.
+
 ---
 
 ## Como desenvolver
@@ -84,14 +86,56 @@ docker-compose exec backend npx prisma migrate dev --name nome-da-migracao
 docker-compose exec backend npx prisma studio
 ```
 
-# SCRUM-55 Gestão básica de utilizadores## Users API (Initial Setup)
+---
 
-Implemented basic user management:
+## Histórico de alterações
 
-- Seeded initial users (in-memory storage)
-- Created endpoint to list users (GET /users)
-- Created endpoint to create users (POST /users)
-- Implemented user deactivation (PATCH /users/:id/deactivate)
+### SCRUM-55 — Gestão básica de utilizadores (Sprint 1)
+
+- Dados iniciais em memória (in-memory storage)
+- Endpoint GET /users — listar utilizadores
+- Endpoint POST /users — criar utilizador
+- Endpoint PATCH /users/:id/deactivate — desativar utilizador
+
+> Nota: dados em memória são temporários e reiniciam com o servidor.
+
+---
+
+### SCRUM-97 — Atualização do modelo de dados de utilizadores (Sprint 2, subtask 1.1)
+
+Alinhamento dos tipos TypeScript com o schema Prisma:
+
+- `UserRole`: `ADMIN | MANAGER | EMPLOYEE`
+- `UserCategory` (novo): `VETERINARIAN | NURSE | OPERATIONAL | ADMINISTRATIVE`
+- Campos renomeados para coincidir com o schema: `fullName → name`, `isActive → active`
+- `id` alterado de UUID (string) para inteiro com autoincrement
+- Adicionados campos `passwordHash`, `updatedAt`
+- Novo tipo `UserPublic` (omite `passwordHash`) usado nas respostas da API
+- Validação do `POST /users` atualizada para incluir `category`
+
+**Modelo atual da tabela `User`:**
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| id | Int | autoincrement, PK |
+| employeeNumber | String | único |
+| name | String | |
+| email | String | único |
+| passwordHash | String | nunca exposto na API |
+| role | Role | ADMIN, MANAGER, EMPLOYEE |
+| category | Category | VETERINARIAN, NURSE, OPERATIONAL, ADMINISTRATIVE |
+| active | Boolean | default true |
+| createdAt | DateTime | auto |
+| updatedAt | DateTime | auto |
+
+---
+
+### SCRUM-98 — Migration Prisma + Seed inicial (Sprint 2, subtask 1.2)
+
+- Migration `20260313114044_init` já incluía os campos `role` e `category` — verificada e confirmada
+- Criado `backend/src/prisma/seed.ts` com 3 utilizadores iniciais (Admin, Manager, Employee)
+- Passwords encriptadas com bcrypt
+- Seed usa `upsert` — pode ser re-executado sem criar duplicados
 
 Notes:
 - Data is currently stored in-memory (temporary, resets on server restart)
@@ -102,3 +146,21 @@ novas instalações
 
 - npm install --save-dev jest ts-jest @types/jest supertest @types/supertest
 - npm install --save-dev @types/jest
+Para correr o seed:
+```bash
+docker-compose exec backend npm run db:seed
+```
+
+---
+
+### SCRUM-61 — CI, Swagger e documentação de endpoints (Sprint 2)
+
+- Pipeline CI (GitHub Actions) configurado para correr em qualquer branch (push e pull request)
+- Instalado `swagger-jsdoc` + `swagger-ui-express`
+- Documentação interativa disponível em `http://localhost:3001/api-docs`
+- Todos os endpoints documentados com OpenAPI 3.0:
+  - `GET /health`
+  - `GET /users`
+  - `POST /users`
+  - `POST /api/auth/login`
+  - `POST /api/auth/logout`

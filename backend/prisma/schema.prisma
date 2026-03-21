@@ -21,14 +21,36 @@ enum Category {
 }
 
 model User {
-  id             Int      @id @default(autoincrement())
-  employeeNumber String   @unique
+  id             Int            @id @default(autoincrement())
+  employeeNumber String         @unique
   name           String
-  email          String   @unique
+  email          String         @unique
   passwordHash   String
-  role           Role     @default(EMPLOYEE)
+  role           Role           @default(EMPLOYEE)
   category       Category
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  active         Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  refreshTokens  RefreshToken[]
+}
+
+model TokenBlacklist {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }

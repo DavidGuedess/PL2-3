@@ -1,14 +1,12 @@
 import { User } from '../types/user'
 
-import { v4 as uuidv4 } from 'uuid'
-
-
 export const users: User[] = [
   {
-    id: uuidv4(),
-    fullName: 'Admin User',
-    email: 'admin@miaw.com',
+    id: 1,
     employeeNumber: 'ADMIN001',
+    name: 'Admin User',
+    email: 'admin@miaw.com',
+    passwordHash: '$2a$10$YQs7Z5qZ5Z5Z5Z5Z5Z5Z5uK5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z',
     role: 'ADMIN',
     professionalCategory: 'FILLER1',
     contact: '123456789',
@@ -17,10 +15,11 @@ export const users: User[] = [
     createdAt: new Date().toISOString()
   },
   {
-    id: uuidv4(),
-    fullName: 'Manager User',
-    email: 'manager@miaw.com',
+    id: 2,
     employeeNumber: 'MAN001',
+    name: 'Manager User',
+    email: 'manager@miaw.com',
+    passwordHash: '$2a$10$YQs7Z5qZ5Z5Z5Z5Z5Z5Z5uK5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z',
     role: 'MANAGER',
     professionalCategory: 'FILLER2',
     contact: '123456789',
@@ -29,10 +28,11 @@ export const users: User[] = [
     createdAt: new Date().toISOString()
   },
   {
-    id: uuidv4(),
-    fullName: 'Employee User',
-    email: 'employee@miaw.com',
+    id: 3,
     employeeNumber: 'EMP001',
+    name: 'Employee User',
+    email: 'employee@miaw.com',
+    passwordHash: '$2a$10$YQs7Z5qZ5Z5Z5Z5Z5Z5Z5uK5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z',
     role: 'EMPLOYEE',
     professionalCategory: 'FILLER3',
     contact: '123456789',
