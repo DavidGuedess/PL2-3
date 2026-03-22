@@ -34,6 +34,16 @@ model User {
   refreshTokens  RefreshToken[]
 }
 
+model ShiftType {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  startTime String
+  endTime   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  shifts    Shift[]
+}
+
 model TokenBlacklist {
   id        Int      @id @default(autoincrement())
   token     String   @unique
