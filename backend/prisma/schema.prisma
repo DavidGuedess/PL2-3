@@ -32,6 +32,7 @@ model User {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   refreshTokens  RefreshToken[]
+  shifts         Shift[]
 }
 
 model ShiftType {
@@ -42,6 +43,19 @@ model ShiftType {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   shifts    Shift[]
+}
+
+model Shift {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  shiftTypeId Int
+  date        DateTime  @db.Date
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shiftType   ShiftType @relation(fields: [shiftTypeId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, date])
 }
 
 model TokenBlacklist {
