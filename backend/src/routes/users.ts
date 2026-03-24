@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express'
 import { users } from '../data/users'
 import { User, UserRole, UserCategory, UserPublic } from '../types/user'
+import { hashPassword } from '../utils/password'
+import { authenticate } from '../middleware/auth'
 
 /**
  * @openapi
@@ -18,6 +20,8 @@ import { User, UserRole, UserCategory, UserPublic } from '../types/user'
  *         email:
  *           type: string
  *           format: email
+ *         passwordHash:
+ *           type: string
  *         role:
  *           type: string
  *           enum: [ADMIN, MANAGER, EMPLOYEE]
@@ -34,7 +38,7 @@ import { User, UserRole, UserCategory, UserPublic } from '../types/user'
  *           format: date-time
  *     CreateUserInput:
  *       type: object
- *       required: [name, email, employeeNumber, role, category]
+ *       required: [name, email, employeeNumber, role, category, password]
  *       properties:
  *         name:
  *           type: string
@@ -49,9 +53,14 @@ import { User, UserRole, UserCategory, UserPublic } from '../types/user'
  *         category:
  *           type: string
  *           enum: [VETERINARIAN, NURSE, OPERATIONAL, ADMINISTRATIVE]
+ *         password:
+ *           type: string
+ *           format: password
  */
 
 const router = Router()
+
+router.use(authenticate)
 
 const toPublic = (user: User): UserPublic => {
   const { passwordHash: _omit, ...publicUser } = user
@@ -106,63 +115,59 @@ router.get('/', (_req: Request, res: Response) => {
  *       409:
  *         description: Email ou número de funcionário já existe
  */
-router.post('/', (req: Request, res: Response) => {
-  const { name, email, employeeNumber, role, category } = req.body
+router.post('/', async (req: Request, res: Response) => {
+  const { name, email, employeeNumber, role, category, password } = req.body
 
   const validRoles: UserRole[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-  if (typeof fullName !== 'string' || fullName.trim() === '') {
-    return res.status(400).json({
-      message: 'fullName is required and must be a non-empty string'
-    })
+  if (typeof name !== 'string' || name.trim() === '') {
+    return res.status(400).json({ message: 'name is required and must be a non-empty string' })
   }
 
   if (typeof email !== 'string' || !emailRegex.test(email.trim().toLowerCase())) {
-    return res.status(400).json({
-      message: 'Invalid email format'
-    })
+    return res.status(400).json({ message: 'Invalid email format' })
   }
 
   if (typeof employeeNumber !== 'string' || employeeNumber.trim() === '') {
-    return res.status(400).json({
-      message: 'employeeNumber is required and must be a non-empty string'
-    })
+    return res.status(400).json({ message: 'employeeNumber is required and must be a non-empty string' })
   }
 
   if (typeof role !== 'string' || !validRoles.includes(role as UserRole)) {
-    return res.status(400).json({
-      message: 'Invalid role'
-    })
+    return res.status(400).json({ message: 'Invalid role' })
   }
 
-  const normalizedFullName = fullName.trim()
+  const validCategories: UserCategory[] = ['VETERINARIAN', 'NURSE', 'OPERATIONAL', 'ADMINISTRATIVE']
+
+  if (typeof category !== 'string' || !validCategories.includes(category as UserCategory)) {
+    return res.status(400).json({ message: 'Invalid category' })
+  }
+
+  if (typeof password !== 'string' || password.length < 6) {
+    return res.status(400).json({ message: 'password is required and must be at least 6 characters' })
+  }
+
+  const normalizedName = name.trim()
   const normalizedEmail = email.trim().toLowerCase()
   const normalizedEmployeeNumber = employeeNumber.trim()
 
-  const emailAlreadyExists = users.find(function (user) {
-    return user.email.toLowerCase() === normalizedEmail
-  })
-
-  if (emailAlreadyExists) {
-    return res.status(409).json({
-      message: 'Email already exists'
-    })
+  if (users.find(u => u.email.toLowerCase() === normalizedEmail)) {
+    return res.status(409).json({ message: 'Email already exists' })
   }
 
-  const employeeNumberAlreadyExists = users.find(function (user) {
-    return user.employeeNumber === normalizedEmployeeNumber
-  })
-
-  if (users.find(u => u.employeeNumber === employeeNumber)) {
+  if (users.find(u => u.employeeNumber === normalizedEmployeeNumber)) {
     return res.status(409).json({ message: 'Employee number already exists' })
   }
 
+  const newId = users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1
+  const passwordHash = await hashPassword(password)
+
   const newUser: User = {
-    id: uuidv4(),
-    fullName: normalizedFullName,
+    id: newId,
+    name: normalizedName,
     email: normalizedEmail,
     employeeNumber: normalizedEmployeeNumber,
+    passwordHash,
     role: role as UserRole,
     category: category as UserCategory,
     active: true,
@@ -172,39 +177,47 @@ router.post('/', (req: Request, res: Response) => {
 
   users.push(newUser)
 
-  return res.status(201).json(newUser)
+  return res.status(201).json(toPublic(newUser))
 })
 
+/**
+ * @openapi
+ * /users/{id}/deactivate:
+ *   patch:
+ *     tags: [Users]
+ *     summary: Desativar um utilizador
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Utilizador desativado
+ *       404:
+ *         description: Utilizador não encontrado
+ *       409:
+ *         description: Utilizador já está desativado
+ */
 router.patch('/:id/deactivate', (req: Request, res: Response) => {
   const { id } = req.params
 
-  const user = users.find(function (user) {
-      
-      if (!id) {
-        return res.status(400).json({
-          message: 'User id is required'
-        })
-      }  
-
-      return user.id === id
-  })
+  const user = users.find(u => u.id === Number(id))
 
   if (!user) {
-    return res.status(404).json({
-      message: 'User not found'
-    })
+    return res.status(404).json({ message: 'User not found' })
   }
 
-  if (!user.isActive) {
-    return res.status(409).json({
-      message: 'User already deactivated'
-    })
+  if (!user.active) {
+    return res.status(409).json({ message: 'User already deactivated' })
   }
 
-  user.isActive = false
+  user.active = false
 
-  return res.status(200).json(user)
-
+  return res.status(200).json(toPublic(user))
 })
 
 export default router

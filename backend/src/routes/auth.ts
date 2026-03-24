@@ -16,27 +16,84 @@ const router = Router();
  *         application/json:
  *           schema:
  *             type: object
- *             required: [email, password]
+ *             required: [employeeNumber, password]
  *             properties:
- *               email:
+ *               employeeNumber:
  *                 type: string
- *                 format: email
+ *                 example: EMP001
  *               password:
  *                 type: string
+ *                 format: password
  *     responses:
  *       200:
- *         description: Login bem-sucedido, devolve token JWT
+ *         description: Login bem-sucedido
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 token:
+ *                 accessToken:
  *                   type: string
+ *                 refreshToken:
+ *                   type: string
+ *                 user:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                     employeeNumber:
+ *                       type: string
+ *                     name:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     role:
+ *                       type: string
+ *                       enum: [ADMIN, MANAGER, EMPLOYEE]
+ *                     category:
+ *                       type: string
+ *                       enum: [VETERINARIAN, NURSE, OPERATIONAL, ADMINISTRATIVE]
+ *       400:
+ *         description: Campos obrigatórios em falta
  *       401:
  *         description: Credenciais inválidas
  */
 router.post('/login', login);
+
+/**
+ * @openapi
+ * /api/auth/refresh:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Obter novo access token via refresh token
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Novos tokens emitidos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 accessToken:
+ *                   type: string
+ *                 refreshToken:
+ *                   type: string
+ *       400:
+ *         description: Refresh token em falta
+ *       401:
+ *         description: Refresh token inválido ou expirado
+ */
+router.post('/refresh', refresh);
 
 /**
  * @openapi
@@ -46,10 +103,28 @@ router.post('/login', login);
  *     summary: Terminar sessão
  *     security:
  *       - bearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               refreshToken:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Logout bem-sucedido
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Logout successful
+ *       401:
+ *         description: Token não fornecido ou inválido
  */
-router.post('/logout', logout);
+router.post('/logout', authenticate, logout);
 
 export default router;

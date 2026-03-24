@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { comparePassword } from '../utils/password';
 import { generateAccessToken, generateRefreshToken, getTokenExpiration, getRefreshTokenExpiration } from '../utils/jwt';
 import { addToBlacklist } from '../services/tokenBlacklist';
-import { createRefreshToken, findRefreshToken } from '../services/refreshToken';
+import { createRefreshToken, findRefreshToken, deleteRefreshToken } from '../services/refreshToken';
 
 const prisma = new PrismaClient();
 
@@ -55,6 +55,53 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   });
 };
 
-export const logout = async (_req: Request, res: Response): Promise<void> => {
+export const logout = async (req: Request, res: Response): Promise<void> => {
+  const token = req.token!;
+  const { refreshToken } = req.body;
+
+  await addToBlacklist(token, getTokenExpiration(token));
+
+  if (refreshToken) {
+    await deleteRefreshToken(refreshToken);
+  }
+
   res.status(200).json({ message: 'Logout successful' });
+};
+
+export const refresh = async (req: Request, res: Response): Promise<void> => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    res.status(400).json({ error: 'Refresh token obrigatório' });
+    return;
+  }
+
+  const storedToken = await findRefreshToken(refreshToken);
+
+  if (!storedToken) {
+    res.status(401).json({ error: 'Refresh token inválido' });
+    return;
+  }
+
+  if (storedToken.expiresAt < new Date()) {
+    await deleteRefreshToken(refreshToken);
+    res.status(401).json({ error: 'Refresh token expirado' });
+    return;
+  }
+
+  const newAccessToken = generateAccessToken({
+    userId: storedToken.user.id,
+    email: storedToken.user.email
+  });
+
+  const newRefreshToken = generateRefreshToken();
+  const newExpiration = getRefreshTokenExpiration();
+
+  await deleteRefreshToken(refreshToken);
+  await createRefreshToken(storedToken.user.id, newRefreshToken, newExpiration);
+
+  res.status(200).json({
+    accessToken: newAccessToken,
+    refreshToken: newRefreshToken
+  });
 };
