@@ -33,7 +33,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
   const accessToken = generateAccessToken({
     userId: user.id,
-    email: user.email
+    email: user.email,
+    role: user.role
   });
 
   const refreshToken = generateRefreshToken();
@@ -91,7 +92,8 @@ export const refresh = async (req: Request, res: Response): Promise<void> => {
 
   const newAccessToken = generateAccessToken({
     userId: storedToken.user.id,
-    email: storedToken.user.email
+    email: storedToken.user.email,
+    role: storedToken.user.role
   });
 
   const newRefreshToken = generateRefreshToken();

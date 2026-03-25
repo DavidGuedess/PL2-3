@@ -1,8 +1,11 @@
 import { Router, Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
+import { authenticate, requireRole } from '../middleware/auth'
 
 const router = Router()
 const prisma = new PrismaClient()
+
+router.use(authenticate)
 
 /**
  * @openapi
@@ -48,6 +51,8 @@ const prisma = new PrismaClient()
  *   get:
  *     summary: Listar todos os tipos de turno
  *     tags: [Turnos]
+ *     security:
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Lista de tipos de turno
@@ -57,6 +62,8 @@ const prisma = new PrismaClient()
  *               type: array
  *               items:
  *                 $ref: '#/components/schemas/ShiftType'
+ *       401:
+ *         description: Não autenticado
  */
 router.get('/', async (_req: Request, res: Response) => {
   const shiftTypes = await prisma.shiftType.findMany({ orderBy: { name: 'asc' } })
@@ -67,8 +74,10 @@ router.get('/', async (_req: Request, res: Response) => {
  * @openapi
  * /shift-types:
  *   post:
- *     summary: Criar um novo tipo de turno
+ *     summary: Criar um novo tipo de turno (Admin/Gestor)
  *     tags: [Turnos]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -84,10 +93,14 @@ router.get('/', async (_req: Request, res: Response) => {
  *               $ref: '#/components/schemas/ShiftType'
  *       400:
  *         description: Campos obrigatórios em falta
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
  *       409:
  *         description: Já existe um tipo de turno com esse nome
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
   const { name, startTime, endTime } = req.body
 
   if (!name || !startTime || !endTime) {
@@ -110,8 +123,10 @@ router.post('/', async (req: Request, res: Response) => {
  * @openapi
  * /shift-types/{id}:
  *   patch:
- *     summary: Atualizar um tipo de turno
+ *     summary: Atualizar um tipo de turno (Admin/Gestor)
  *     tags: [Turnos]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -130,10 +145,14 @@ router.post('/', async (req: Request, res: Response) => {
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ShiftType'
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
  *       404:
  *         description: Tipo de turno não encontrado
  */
-router.patch('/:id', async (req: Request, res: Response) => {
+router.patch('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
   const id = parseInt(req.params.id)
   const { name, startTime, endTime } = req.body
 
@@ -154,8 +173,10 @@ router.patch('/:id', async (req: Request, res: Response) => {
  * @openapi
  * /shift-types/{id}:
  *   delete:
- *     summary: Eliminar um tipo de turno
+ *     summary: Eliminar um tipo de turno (Admin/Gestor)
  *     tags: [Turnos]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -165,10 +186,14 @@ router.patch('/:id', async (req: Request, res: Response) => {
  *     responses:
  *       204:
  *         description: Tipo de turno eliminado
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
  *       404:
  *         description: Tipo de turno não encontrado
  */
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
   const id = parseInt(req.params.id)
 
   const existing = await prisma.shiftType.findUnique({ where: { id } })

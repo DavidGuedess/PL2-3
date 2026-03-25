@@ -11,6 +11,16 @@ declare global {
   }
 }
 
+export const requireRole = (...roles: string[]) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      res.status(403).json({ error: 'Acesso não autorizado' })
+      return
+    }
+    next()
+  }
+}
+
 export const authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const authHeader = req.headers.authorization
 

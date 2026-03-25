@@ -122,7 +122,7 @@ describe('Auth API', () => {
       mockFindRefreshToken.mockResolvedValue({
         token: 'valid-refresh-token',
         expiresAt: new Date(Date.now() + 1000 * 60 * 60),
-        user: { id: 1, email: 'test@test.com' }
+        user: { id: 1, email: 'test@test.com', role: 'EMPLOYEE' }
       })
 
       const res = await request(app)
@@ -156,7 +156,7 @@ describe('Auth API', () => {
       mockFindRefreshToken.mockResolvedValue({
         token: 'expired-token',
         expiresAt: new Date(Date.now() - 1000),
-        user: { id: 1, email: 'test@test.com' }
+        user: { id: 1, email: 'test@test.com', role: 'EMPLOYEE' }
       })
 
       const res = await request(app)

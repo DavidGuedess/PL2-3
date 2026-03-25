@@ -197,3 +197,30 @@ Novos ficheiros: `backend/src/routes/shiftTypes.ts`, `backend/src/routes/shifts.
   - `POST /users`
   - `POST /api/auth/login`
   - `POST /api/auth/logout`
+
+---
+
+### SCRUM-63 — Controlo de acesso por papel - RBAC (Sprint 2)
+
+- Campo `role` adicionado ao payload do JWT (access token inclui agora `userId`, `email` e `role`)
+- Criado middleware `requireRole(...roles)` em `middleware/auth.ts` — retorna 403 se o papel do utilizador não estiver na lista permitida
+- Adicionado `authenticate` aos routers de `/shifts` e `/shift-types` (estavam sem autenticação)
+- RBAC aplicado a todos os endpoints existentes:
+
+| Endpoint | Papéis permitidos |
+|---|---|
+| `GET /users` | ADMIN, MANAGER |
+| `GET /users/me` | todos |
+| `GET /users/:id` | ADMIN |
+| `POST /users` | ADMIN |
+| `PATCH /users/me` | todos |
+| `PATCH /users/:id/deactivate` | ADMIN |
+| `GET /shifts` | todos |
+| `POST /shifts` | ADMIN, MANAGER |
+| `GET /shift-types` | todos |
+| `POST /shift-types` | ADMIN, MANAGER |
+| `PATCH /shift-types/:id` | ADMIN, MANAGER |
+| `DELETE /shift-types/:id` | ADMIN, MANAGER |
+
+- Documentação Swagger atualizada com `security: bearerAuth` e respostas `401`/`403` em todos os endpoints protegidos
+- Criado `tests/rbac.test.ts` com testes de autorização (403 para papéis incorretos, acesso confirmado para papéis corretos)
