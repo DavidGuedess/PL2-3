@@ -2,31 +2,38 @@ import request from 'supertest'
 import app from '../app'
 import { users } from '../data/users'
 
+jest.mock('../middleware/auth', () => ({
+  authenticate: (req: any, _res: any, next: any) => {
+    const userId = req.headers['x-user-id']
+    req.user = { userId: userId ? Number(userId) : NaN, email: '' }
+    next()
+  }
+}))
+
 describe('Users API', () => {
   beforeEach(() => {
     users.length = 0
   })
 
   describe('GET /users', () => {
-    it('should return all users without password field', async () => {
+    it('should return all users without passwordHash field', async () => {
       await request(app)
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'List User',
+          name: 'List User',
           email: 'listuser@test.com',
           employeeNumber: 'LIST001',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const res = await request(app).get('/users')
 
       expect(res.status).toBe(200)
       expect(Array.isArray(res.body)).toBe(true)
-      expect(res.body[0].password).toBeUndefined()
+      expect(res.body[0].passwordHash).toBeUndefined()
     })
   })
 
@@ -36,13 +43,12 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Me User',
+          name: 'Me User',
           email: 'me@test.com',
           employeeNumber: 'ME001',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const userId = createRes.body.id
@@ -54,7 +60,7 @@ describe('Users API', () => {
       expect(res.status).toBe(200)
       expect(res.body.id).toBe(userId)
       expect(res.body.email).toBe('me@test.com')
-      expect(res.body.password).toBeUndefined()
+      expect(res.body.passwordHash).toBeUndefined()
     })
 
     it('should return 401 if authenticated user is missing', async () => {
@@ -70,13 +76,12 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Target User',
+          name: 'Target User',
           email: 'target@test.com',
           employeeNumber: 'TARGET001',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const userId = createRes.body.id
@@ -87,12 +92,12 @@ describe('Users API', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.id).toBe(userId)
-      expect(res.body.password).toBeUndefined()
+      expect(res.body.passwordHash).toBeUndefined()
     })
 
     it('should return 404 if user does not exist', async () => {
       const res = await request(app)
-        .get('/users/non-existing-id')
+        .get('/users/99999')
         .set('x-user-role', 'ADMIN')
 
       expect(res.status).toBe(404)
@@ -100,7 +105,7 @@ describe('Users API', () => {
 
     it('should return 403 if non-admin tries to get user by id', async () => {
       const res = await request(app)
-        .get('/users/non-existing-id')
+        .get('/users/99999')
         .set('x-user-role', 'EMPLOYEE')
 
       expect(res.status).toBe(403)
@@ -113,20 +118,19 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Test User',
+          name: 'Test User',
           email: 'testuser1@test.com',
           employeeNumber: 'TEST001',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       expect(res.status).toBe(201)
       expect(res.body).toHaveProperty('id')
       expect(res.body.email).toBe('testuser1@test.com')
-      expect(res.body.isActive).toBe(true)
-      expect(res.body.password).toBeUndefined()
+      expect(res.body.active).toBe(true)
+      expect(res.body.passwordHash).toBeUndefined()
     })
 
     it('should fail if required fields are missing', async () => {
@@ -140,50 +144,17 @@ describe('Users API', () => {
       expect(res.status).toBe(400)
     })
 
-    it('should fail if contact is missing', async () => {
-      const res = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          fullName: 'Missing Contact',
-          email: 'missingcontact@test.com',
-          employeeNumber: 'TEST012',
-          role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          password: 'password123'
-        })
-
-      expect(res.status).toBe(400)
-    })
-
-    it('should fail if password is missing', async () => {
-      const res = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          fullName: 'Missing Password',
-          email: 'missingpassword@test.com',
-          employeeNumber: 'TEST013',
-          role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678'
-        })
-
-      expect(res.status).toBe(400)
-    })
-
     it('should fail with invalid email', async () => {
       const res = await request(app)
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Invalid Email',
+          name: 'Invalid Email',
           email: 'invalid-email',
           employeeNumber: 'TEST002',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       expect(res.status).toBe(400)
@@ -194,30 +165,44 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Invalid Role',
+          name: 'Invalid Role',
           email: 'role@test.com',
           employeeNumber: 'TEST003',
           role: 'INVALID_ROLE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       expect(res.status).toBe(400)
     })
 
-    it('should fail with invalid professional category', async () => {
+    it('should fail with invalid category', async () => {
       const res = await request(app)
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Invalid Category',
-          email: 'invalidcategory@test.com',
-          employeeNumber: 'TEST004',
+          name: 'Invalid Category',
+          email: 'category@test.com',
+          employeeNumber: 'TEST003B',
           role: 'EMPLOYEE',
-          professionalCategory: 'INVALID_CATEGORY',
-          contact: '912345678',
-          password: 'password123'
+          category: 'INVALID_CATEGORY',
+          password: 'secret123'
+        })
+
+      expect(res.status).toBe(400)
+    })
+
+    it('should fail with password too short', async () => {
+      const res = await request(app)
+        .post('/users')
+        .set('x-user-role', 'ADMIN')
+        .send({
+          name: 'Short Password',
+          email: 'short@test.com',
+          employeeNumber: 'TEST003C',
+          role: 'EMPLOYEE',
+          category: 'VETERINARIAN',
+          password: '123'
         })
 
       expect(res.status).toBe(400)
@@ -225,54 +210,40 @@ describe('Users API', () => {
 
     it('should fail if email already exists', async () => {
       const user = {
-        fullName: 'Duplicate Email',
+        name: 'Duplicate Email',
         email: 'duplicate@test.com',
-        employeeNumber: 'TEST005',
+        employeeNumber: 'TEST004',
         role: 'EMPLOYEE',
-        professionalCategory: 'FILLER1',
-        contact: '912345678',
-        password: 'password123'
+        category: 'VETERINARIAN',
+        password: 'secret123'
       }
 
-      await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send(user)
+      await request(app).post('/users').set('x-user-role', 'ADMIN').send(user)
 
       const res = await request(app)
         .post('/users')
         .set('x-user-role', 'ADMIN')
-        .send({
-          ...user,
-          employeeNumber: 'TEST006'
-        })
+        .send({ ...user, employeeNumber: 'TEST005' })
 
       expect(res.status).toBe(409)
     })
 
     it('should fail if employee number already exists', async () => {
       const user = {
-        fullName: 'Duplicate Employee',
+        name: 'Duplicate Employee',
         email: 'employee@test.com',
-        employeeNumber: 'TEST007',
+        employeeNumber: 'TEST006',
         role: 'EMPLOYEE',
-        professionalCategory: 'FILLER1',
-        contact: '912345678',
-        password: 'password123'
+        category: 'VETERINARIAN',
+        password: 'secret123'
       }
 
-      await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send(user)
+      await request(app).post('/users').set('x-user-role', 'ADMIN').send(user)
 
       const res = await request(app)
         .post('/users')
         .set('x-user-role', 'ADMIN')
-        .send({
-          ...user,
-          email: 'newemail@test.com'
-        })
+        .send({ ...user, email: 'newemail@test.com' })
 
       expect(res.status).toBe(409)
     })
@@ -282,13 +253,12 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'EMPLOYEE')
         .send({
-          fullName: 'Forbidden User',
+          name: 'Forbidden User',
           email: 'forbidden@test.com',
           employeeNumber: 'TEST010',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       expect(res.status).toBe(403)
@@ -301,13 +271,12 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Deactivate User',
+          name: 'Deactivate User',
           email: 'deactivate@test.com',
-          employeeNumber: 'TEST008',
+          employeeNumber: 'TEST007',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const userId = createRes.body.id
@@ -317,13 +286,13 @@ describe('Users API', () => {
         .set('x-user-role', 'ADMIN')
 
       expect(res.status).toBe(200)
-      expect(res.body.isActive).toBe(false)
-      expect(res.body.password).toBeUndefined()
+      expect(res.body.active).toBe(false)
+      expect(res.body.passwordHash).toBeUndefined()
     })
 
     it('should fail if user does not exist', async () => {
       const res = await request(app)
-        .patch('/users/non-existing-id/deactivate')
+        .patch('/users/99999/deactivate')
         .set('x-user-role', 'ADMIN')
 
       expect(res.status).toBe(404)
@@ -334,20 +303,17 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Already Deactivated',
+          name: 'Already Deactivated',
           email: 'already@test.com',
-          employeeNumber: 'TEST009',
+          employeeNumber: 'TEST008',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const userId = createRes.body.id
 
-      await request(app)
-        .patch(`/users/${userId}/deactivate`)
-        .set('x-user-role', 'ADMIN')
+      await request(app).patch(`/users/${userId}/deactivate`).set('x-user-role', 'ADMIN')
 
       const res = await request(app)
         .patch(`/users/${userId}/deactivate`)
@@ -361,13 +327,12 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Protected User',
+          name: 'Protected User',
           email: 'protected@test.com',
           employeeNumber: 'TEST011',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const userId = createRes.body.id
@@ -381,18 +346,17 @@ describe('Users API', () => {
   })
 
   describe('PATCH /users/me', () => {
-    it('should update the authenticated user fullName', async () => {
+    it('should update the authenticated user name', async () => {
       const createRes = await request(app)
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Old Name',
+          name: 'Old Name',
           email: 'patch1@test.com',
           employeeNumber: 'PATCH001',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const userId = createRes.body.id
@@ -400,41 +364,11 @@ describe('Users API', () => {
       const res = await request(app)
         .patch('/users/me')
         .set('x-user-id', userId)
-        .send({
-          fullName: 'New Name'
-        })
+        .send({ name: 'New Name' })
 
       expect(res.status).toBe(200)
-      expect(res.body.fullName).toBe('New Name')
-      expect(res.body.password).toBeUndefined()
-    })
-
-    it('should update the authenticated user contact', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          fullName: 'Contact User',
-          email: 'patch2@test.com',
-          employeeNumber: 'PATCH002',
-          role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
-        })
-
-      const userId = createRes.body.id
-
-      const res = await request(app)
-        .patch('/users/me')
-        .set('x-user-id', userId)
-        .send({
-          contact: '919999999'
-        })
-
-      expect(res.status).toBe(200)
-      expect(res.body.contact).toBe('919999999')
-      expect(res.body.password).toBeUndefined()
+      expect(res.body.name).toBe('New Name')
+      expect(res.body.passwordHash).toBeUndefined()
     })
 
     it('should update the authenticated user password without returning it', async () => {
@@ -442,13 +376,12 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Password User',
+          name: 'Password User',
           email: 'patch3@test.com',
           employeeNumber: 'PATCH003',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const userId = createRes.body.id
@@ -456,12 +389,10 @@ describe('Users API', () => {
       const res = await request(app)
         .patch('/users/me')
         .set('x-user-id', userId)
-        .send({
-          password: 'newpassword456'
-        })
+        .send({ password: 'newpassword456' })
 
       expect(res.status).toBe(200)
-      expect(res.body.password).toBeUndefined()
+      expect(res.body.passwordHash).toBeUndefined()
     })
 
     it('should update multiple fields of the authenticated user', async () => {
@@ -469,13 +400,12 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Multi User',
+          name: 'Multi User',
           email: 'patch4@test.com',
           employeeNumber: 'PATCH004',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const userId = createRes.body.id
@@ -483,16 +413,11 @@ describe('Users API', () => {
       const res = await request(app)
         .patch('/users/me')
         .set('x-user-id', userId)
-        .send({
-          fullName: 'Updated Multi User',
-          contact: '911111111',
-          password: 'updatedpassword'
-        })
+        .send({ name: 'Updated Multi User', password: 'updatedpassword' })
 
       expect(res.status).toBe(200)
-      expect(res.body.fullName).toBe('Updated Multi User')
-      expect(res.body.contact).toBe('911111111')
-      expect(res.body.password).toBeUndefined()
+      expect(res.body.name).toBe('Updated Multi User')
+      expect(res.body.passwordHash).toBeUndefined()
     })
 
     it('should return 400 if no fields are provided', async () => {
@@ -500,13 +425,12 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Empty Patch',
+          name: 'Empty Patch',
           email: 'patch5@test.com',
           employeeNumber: 'PATCH005',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const userId = createRes.body.id
@@ -519,18 +443,17 @@ describe('Users API', () => {
       expect(res.status).toBe(400)
     })
 
-    it('should return 400 for invalid fullName', async () => {
+    it('should return 400 for invalid name', async () => {
       const createRes = await request(app)
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Invalid Name',
+          name: 'Invalid Name',
           email: 'patch6@test.com',
           employeeNumber: 'PATCH006',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const userId = createRes.body.id
@@ -538,35 +461,7 @@ describe('Users API', () => {
       const res = await request(app)
         .patch('/users/me')
         .set('x-user-id', userId)
-        .send({
-          fullName: ''
-        })
-
-      expect(res.status).toBe(400)
-    })
-
-    it('should return 400 for invalid contact', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          fullName: 'Invalid Contact',
-          email: 'patch7@test.com',
-          employeeNumber: 'PATCH007',
-          role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
-        })
-
-      const userId = createRes.body.id
-
-      const res = await request(app)
-        .patch('/users/me')
-        .set('x-user-id', userId)
-        .send({
-          contact: ''
-        })
+        .send({ name: '' })
 
       expect(res.status).toBe(400)
     })
@@ -576,13 +471,12 @@ describe('Users API', () => {
         .post('/users')
         .set('x-user-role', 'ADMIN')
         .send({
-          fullName: 'Invalid Password',
+          name: 'Invalid Password',
           email: 'patch8@test.com',
           employeeNumber: 'PATCH008',
           role: 'EMPLOYEE',
-          professionalCategory: 'FILLER1',
-          contact: '912345678',
-          password: 'password123'
+          category: 'VETERINARIAN',
+          password: 'secret123'
         })
 
       const userId = createRes.body.id
@@ -590,9 +484,7 @@ describe('Users API', () => {
       const res = await request(app)
         .patch('/users/me')
         .set('x-user-id', userId)
-        .send({
-          password: ''
-        })
+        .send({ password: '123' })
 
       expect(res.status).toBe(400)
     })
@@ -600,9 +492,7 @@ describe('Users API', () => {
     it('should return 401 if authenticated user is missing', async () => {
       const res = await request(app)
         .patch('/users/me')
-        .send({
-          fullName: 'No Auth'
-        })
+        .send({ name: 'No Auth' })
 
       expect(res.status).toBe(401)
     })

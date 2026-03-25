@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3001
 
 app.use(express.json())
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec))
-app.use((req, _res, next) => {           // ← adiciona isto
+app.use((req, _res, next) => {
   console.log('req.body:', req.body)
   next()
 })

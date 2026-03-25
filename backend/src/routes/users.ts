@@ -1,280 +1,319 @@
-import { Router, Request, Response } from "express";
-import { v4 as uuidv4 } from "uuid";
-import { users } from "../data/users";
-import { User, UserRole, ProfessionalCategory } from "../types/user";
+import { Router, Request, Response } from 'express'
+import { users } from '../data/users'
+import { User, UserRole, UserCategory, UserPublic } from '../types/user'
+import { hashPassword } from '../utils/password'
+import { authenticate } from '../middleware/auth'
 
-const router = Router();
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     UserPublic:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *         employeeNumber:
+ *           type: string
+ *         name:
+ *           type: string
+ *         email:
+ *           type: string
+ *           format: email
+ *         role:
+ *           type: string
+ *           enum: [ADMIN, MANAGER, EMPLOYEE]
+ *         category:
+ *           type: string
+ *           enum: [VETERINARIAN, NURSE, OPERATIONAL, ADMINISTRATIVE]
+ *         active:
+ *           type: boolean
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *     CreateUserInput:
+ *       type: object
+ *       required: [name, email, employeeNumber, role, category, password]
+ *       properties:
+ *         name:
+ *           type: string
+ *         email:
+ *           type: string
+ *           format: email
+ *         employeeNumber:
+ *           type: string
+ *         role:
+ *           type: string
+ *           enum: [ADMIN, MANAGER, EMPLOYEE]
+ *         category:
+ *           type: string
+ *           enum: [VETERINARIAN, NURSE, OPERATIONAL, ADMINISTRATIVE]
+ *         password:
+ *           type: string
+ *           format: password
+ */
+
+const router = Router()
+
+router.use(authenticate)
+
+const toPublic = (user: User): UserPublic => {
+  const { passwordHash: _omit, ...publicUser } = user
+  return publicUser
+}
 
 function requireAdmin(req: Request, res: Response, next: Function) {
-  const role = req.headers["x-user-role"];
-
-  if (role !== "ADMIN") {
-    return res.status(403).json({
-      message: "Forbidden: Admins only",
-    });
+  if (req.headers['x-user-role'] !== 'ADMIN') {
+    return res.status(403).json({ message: 'Forbidden: Admins only' })
   }
-
-  next();
+  next()
 }
 
 function getAuthenticatedUser(req: Request) {
-  const userId = req.headers["x-user-id"];
-
-  if (typeof userId !== "string" || userId.trim() === "") {
-    return null;
-  }
-
-  const authenticatedUser = users.find(function (user) {
-    return user.id === userId;
-  });
-
-  return authenticatedUser || null;
+  const userId = req.user?.userId
+  if (!userId || isNaN(userId)) return null
+  return users.find(u => u.id === userId) || null
 }
 
-function sanitizeUser(user: User) {
-  const { password, ...safeUser } = user;
-  return safeUser;
-}
+/**
+ * @openapi
+ * /users:
+ *   get:
+ *     tags: [Users]
+ *     summary: Listar todos os utilizadores
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de utilizadores
+ */
+router.get('/', (_req: Request, res: Response) => {
+  return res.status(200).json(users.map(toPublic))
+})
 
-router.get("/", (_req: Request, res: Response) => {
-  const safeUsers = users.map(function (user) {
-    return sanitizeUser(user);
-  });
-
-  return res.status(200).json(safeUsers);
-});
-
-router.get("/me", (req: Request, res: Response) => {
-  const authenticatedUser = getAuthenticatedUser(req);
-
-  if (!authenticatedUser) {
-    return res.status(401).json({
-      message: "Unauthorized: Authenticated user not found",
-    });
-  }
-
-  return res.status(200).json(sanitizeUser(authenticatedUser));
-});
-
-router.get("/:id", requireAdmin, (req: Request, res: Response) => {
-  const { id } = req.params;
-  const user = users.find(function (user) {
-    return user.id === id;
-  });
-
+/**
+ * @openapi
+ * /users/me:
+ *   get:
+ *     tags: [Users]
+ *     summary: Obter o utilizador autenticado
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Utilizador autenticado
+ *       401:
+ *         description: Não autenticado
+ */
+router.get('/me', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req)
   if (!user) {
-    return res.status(404).json({
-      message: "User not found",
-    });
+    return res.status(401).json({ message: 'Unauthorized: Authenticated user not found' })
+  }
+  return res.status(200).json(toPublic(user))
+})
+
+/**
+ * @openapi
+ * /users/{id}:
+ *   get:
+ *     tags: [Users]
+ *     summary: Obter um utilizador por id (admin)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Utilizador encontrado
+ *       403:
+ *         description: Sem permissão
+ *       404:
+ *         description: Utilizador não encontrado
+ */
+router.get('/:id', requireAdmin, (req: Request, res: Response) => {
+  const user = users.find(u => u.id === Number(req.params.id))
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' })
+  }
+  return res.status(200).json(toPublic(user))
+})
+
+/**
+ * @openapi
+ * /users:
+ *   post:
+ *     tags: [Users]
+ *     summary: Criar um novo utilizador
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateUserInput'
+ *     responses:
+ *       201:
+ *         description: Utilizador criado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/UserPublic'
+ *       400:
+ *         description: Campos obrigatórios em falta ou inválidos
+ *       409:
+ *         description: Email ou número de funcionário já existe
+ */
+router.post('/', requireAdmin, async (req: Request, res: Response) => {
+  const { name, email, employeeNumber, role, category, password } = req.body
+
+  const validRoles: UserRole[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
+  const validCategories: UserCategory[] = ['VETERINARIAN', 'NURSE', 'OPERATIONAL', 'ADMINISTRATIVE']
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+  if (typeof name !== 'string' || name.trim() === '') {
+    return res.status(400).json({ message: 'name is required and must be a non-empty string' })
   }
 
-  return res.status(200).json(sanitizeUser(user));
-});
-
-router.post("/", requireAdmin, (req: Request, res: Response) => {
-  const {
-    fullName,
-    email,
-    employeeNumber,
-    role,
-    professionalCategory,
-    contact,
-    password,
-  } = req.body;
-
-  const validRoles: UserRole[] = ["ADMIN", "MANAGER", "EMPLOYEE"];
-
-  const validProfessionalCategories: ProfessionalCategory[] = [
-    "FILLER1",
-    "FILLER2",
-    "FILLER3",
-    "FILLER4",
-  ];
-
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-  if (typeof fullName !== "string" || fullName.trim() === "") {
-    return res.status(400).json({
-      message: "fullName is required and must be a non-empty string",
-    });
+  if (typeof email !== 'string' || !emailRegex.test(email.trim().toLowerCase())) {
+    return res.status(400).json({ message: 'Invalid email format' })
   }
 
-  if (
-    typeof email !== "string" ||
-    !emailRegex.test(email.trim().toLowerCase())
-  ) {
-    return res.status(400).json({
-      message: "Invalid email format",
-    });
+  if (typeof employeeNumber !== 'string' || employeeNumber.trim() === '') {
+    return res.status(400).json({ message: 'employeeNumber is required and must be a non-empty string' })
   }
 
-  if (typeof employeeNumber !== "string" || employeeNumber.trim() === "") {
-    return res.status(400).json({
-      message: "employeeNumber is required and must be a non-empty string",
-    });
+  if (typeof role !== 'string' || !validRoles.includes(role as UserRole)) {
+    return res.status(400).json({ message: 'Invalid role' })
   }
 
-  if (typeof role !== "string" || !validRoles.includes(role as UserRole)) {
-    return res.status(400).json({
-      message: "Invalid role",
-    });
+  if (typeof category !== 'string' || !validCategories.includes(category as UserCategory)) {
+    return res.status(400).json({ message: 'Invalid category' })
   }
 
-  if (
-    typeof professionalCategory !== "string" ||
-    !validProfessionalCategories.includes(
-      professionalCategory as ProfessionalCategory,
-    )
-  ) {
-    return res.status(400).json({
-      message: "Invalid professional category",
-    });
+  if (typeof password !== 'string' || password.length < 6) {
+    return res.status(400).json({ message: 'password is required and must be at least 6 characters' })
   }
 
-  if (typeof contact !== "string" || contact.trim() === "") {
-    return res.status(400).json({
-      message: "contact is required and must be a non-empty string",
-    });
+  const normalizedName = name.trim()
+  const normalizedEmail = email.trim().toLowerCase()
+  const normalizedEmployeeNumber = employeeNumber.trim()
+
+  if (users.find(u => u.email.toLowerCase() === normalizedEmail)) {
+    return res.status(409).json({ message: 'Email already exists' })
   }
 
-  if (typeof password !== "string" || password.trim() === "") {
-    return res.status(400).json({
-      message: "password is required and must be a non-empty string",
-    });
+  if (users.find(u => u.employeeNumber === normalizedEmployeeNumber)) {
+    return res.status(409).json({ message: 'Employee number already exists' })
   }
 
-  const normalizedFullName = fullName.trim();
-  const normalizedEmail = email.trim().toLowerCase();
-  const normalizedEmployeeNumber = employeeNumber.trim();
-  const normalizedContact = contact.trim();
-  const normalizedPassword = password.trim();
-  const emailAlreadyExists = users.find(function (user) {
-    return user.email.toLowerCase() === normalizedEmail;
-  });
-
-  if (emailAlreadyExists) {
-    return res.status(409).json({
-      message: "Email already exists",
-    });
-  }
-
-  const employeeNumberAlreadyExists = users.find(function (user) {
-    return user.employeeNumber === normalizedEmployeeNumber;
-  });
-
-  if (employeeNumberAlreadyExists) {
-    return res.status(409).json({
-      message: "Employee number already exists",
-    });
-  }
-
-  if (typeof contact !== "string" || contact.trim() === "") {
-    return res.status(400).json({
-      message: "contact is required and must be a non-empty string",
-    });
-  }
-
-  if (typeof password !== "string" || password.trim() === "") {
-    return res.status(400).json({
-      message: "password is required and must be a non-empty string",
-    });
-  }
+  const newId = users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1
+  const passwordHash = await hashPassword(password)
 
   const newUser: User = {
-    id: uuidv4(),
-    fullName: normalizedFullName,
+    id: newId,
+    name: normalizedName,
     email: normalizedEmail,
     employeeNumber: normalizedEmployeeNumber,
+    passwordHash,
     role: role as UserRole,
-    professionalCategory: professionalCategory as ProfessionalCategory,
-    contact: normalizedContact,
-    password: normalizedPassword,
-    isActive: true,
+    category: category as UserCategory,
+    active: true,
     createdAt: new Date().toISOString(),
-  };
+    updatedAt: new Date().toISOString(),
+  }
 
-  users.push(newUser);
+  users.push(newUser)
+  return res.status(201).json(toPublic(newUser))
+})
 
-  return res.status(201).json(sanitizeUser(newUser))
-});
-
-router.patch("/:id/deactivate", requireAdmin, (req: Request, res: Response) => {
-  const { id } = req.params;
-
-  const user = users.find(function (user) {
-    return user.id === id;
-  });
-
+/**
+ * @openapi
+ * /users/me:
+ *   patch:
+ *     tags: [Users]
+ *     summary: Atualizar o perfil do utilizador autenticado
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Perfil atualizado
+ *       400:
+ *         description: Campos inválidos
+ *       401:
+ *         description: Não autenticado
+ */
+router.patch('/me', async (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req)
   if (!user) {
-    return res.status(404).json({
-      message: "User not found",
-    });
+    return res.status(401).json({ message: 'Unauthorized: Authenticated user not found' })
   }
 
-  if (!user.isActive) {
-    return res.status(409).json({
-      message: "User already deactivated",
-    });
+  const { name, password } = req.body
+
+  if (name === undefined && password === undefined) {
+    return res.status(400).json({ message: 'At least one field must be provided: name or password' })
   }
 
-  user.isActive = false;
-
-  return res.status(200).json(sanitizeUser(user))
-});
-
-router.patch("/me", (req: Request, res: Response) => {
-  const authenticatedUser = getAuthenticatedUser(req);
-
-  if (!authenticatedUser) {
-    return res.status(401).json({
-      message: "Unauthorized: Authenticated user not found",
-    });
-  }
-
-  const { fullName, contact, password } = req.body;
-
-  if (
-    fullName === undefined &&
-    contact === undefined &&
-    password === undefined
-  ) {
-    return res.status(400).json({
-      message:
-        "At least one field must be provided: fullName, contact or password",
-    });
-  }
-
-  if (fullName !== undefined) {
-    if (typeof fullName !== "string" || fullName.trim() === "") {
-      return res.status(400).json({
-        message: "fullName must be a non-empty string",
-      });
+  if (name !== undefined) {
+    if (typeof name !== 'string' || name.trim() === '') {
+      return res.status(400).json({ message: 'name must be a non-empty string' })
     }
-
-    authenticatedUser.fullName = fullName.trim();
-  }
-
-  if (contact !== undefined) {
-    if (typeof contact !== "string" || contact.trim() === "") {
-      return res.status(400).json({
-        message: "contact must be a non-empty string",
-      });
-    }
-
-    authenticatedUser.contact = contact.trim();
+    user.name = name.trim()
   }
 
   if (password !== undefined) {
-    if (typeof password !== "string" || password.trim() === "") {
-      return res.status(400).json({
-        message: "password must be a non-empty string",
-      });
+    if (typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ message: 'password must be at least 6 characters' })
     }
-
-    authenticatedUser.password = password.trim();
+    user.passwordHash = await hashPassword(password)
   }
 
-  return res.status(200).json(sanitizeUser(authenticatedUser));
-});
+  user.updatedAt = new Date().toISOString()
+  return res.status(200).json(toPublic(user))
+})
 
-export default router;
+/**
+ * @openapi
+ * /users/{id}/deactivate:
+ *   patch:
+ *     tags: [Users]
+ *     summary: Desativar um utilizador
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Utilizador desativado
+ *       404:
+ *         description: Utilizador não encontrado
+ *       409:
+ *         description: Utilizador já está desativado
+ */
+router.patch('/:id/deactivate', requireAdmin, (req: Request, res: Response) => {
+  const user = users.find(u => u.id === Number(req.params.id))
+
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' })
+  }
+
+  if (!user.active) {
+    return res.status(409).json({ message: 'User already deactivated' })
+  }
+
+  user.active = false
+  user.updatedAt = new Date().toISOString()
+  return res.status(200).json(toPublic(user))
+})
+
+export default router
