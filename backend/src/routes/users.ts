@@ -31,6 +31,9 @@ import { authenticate } from '../middleware/auth'
  *         createdAt:
  *           type: string
  *           format: date-time
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
  *     CreateUserInput:
  *       type: object
  *       required: [name, email, employeeNumber, role, category, password]
@@ -240,6 +243,19 @@ router.post('/', requireAdmin, async (req: Request, res: Response) => {
  *     summary: Atualizar o perfil do utilizador autenticado
  *     security:
  *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 6
  *     responses:
  *       200:
  *         description: Perfil atualizado
@@ -295,6 +311,8 @@ router.patch('/me', async (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: Utilizador desativado
+ *       403:
+ *         description: Sem permissão
  *       404:
  *         description: Utilizador não encontrado
  *       409:
