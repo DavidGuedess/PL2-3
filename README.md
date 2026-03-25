@@ -153,6 +153,39 @@ docker-compose exec backend npm run db:seed
 
 ---
 
+### SCRUM-67 — Modelo de dados de turnos (Sprint 2)
+
+- Criado modelo Prisma `ShiftType` (nome, hora início, hora fim)
+- Criado modelo Prisma `Shift` (userId, shiftTypeId, data)
+- Migration `20260322000000_shifts` gerada com as duas tabelas
+- Constraint única `userId + date` para impedir turnos sobrepostos
+
+**Modelos adicionados:**
+
+| Modelo | Campos principais |
+|---|---|
+| ShiftType | id, name, startTime, endTime |
+| Shift | id, userId, shiftTypeId, date — unique(userId, date) |
+
+---
+
+### SCRUM-68 — API de gestão e atribuição de turnos (Sprint 2)
+
+Novos ficheiros: `backend/src/routes/shiftTypes.ts`, `backend/src/routes/shifts.ts`
+
+**Endpoints de tipos de turno:**
+- `GET /shift-types` — listar todos os tipos de turno
+- `POST /shift-types` — criar tipo de turno (name, startTime, endTime)
+- `PATCH /shift-types/:id` — atualizar tipo de turno
+- `DELETE /shift-types/:id` — eliminar tipo de turno
+
+**Endpoints de turnos:**
+- `POST /shifts` — atribuir turno a funcionário (userId, shiftTypeId, date)
+- `GET /shifts?week=2026-03-23` — escala semanal (segunda a domingo)
+- `GET /shifts?month=2026-03` — escala mensal
+
+---
+
 ### SCRUM-61 — CI, Swagger e documentação de endpoints (Sprint 2)
 
 - Pipeline CI (GitHub Actions) configurado para correr em qualquer branch (push e pull request)
