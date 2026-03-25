@@ -24,6 +24,75 @@ function getMonthRange(monthStr: string): { start: Date; end: Date } {
   return { start, end }
 }
 
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     Shift:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *         userId:
+ *           type: integer
+ *         shiftTypeId:
+ *           type: integer
+ *         date:
+ *           type: string
+ *           format: date
+ *         user:
+ *           type: object
+ *           properties:
+ *             id:
+ *               type: integer
+ *             name:
+ *               type: string
+ *             employeeNumber:
+ *               type: string
+ *         shiftType:
+ *           $ref: '#/components/schemas/ShiftType'
+ *     CreateShiftInput:
+ *       type: object
+ *       required: [userId, shiftTypeId, date]
+ *       properties:
+ *         userId:
+ *           type: integer
+ *           example: 1
+ *         shiftTypeId:
+ *           type: integer
+ *           example: 1
+ *         date:
+ *           type: string
+ *           format: date
+ *           example: "2026-03-25"
+ */
+
+/**
+ * @openapi
+ * /shifts:
+ *   post:
+ *     summary: Atribuir turno a um funcionário numa data
+ *     tags: [Turnos]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateShiftInput'
+ *     responses:
+ *       201:
+ *         description: Turno atribuído
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Shift'
+ *       400:
+ *         description: Campos obrigatórios em falta
+ *       404:
+ *         description: Utilizador ou tipo de turno não encontrado
+ *       409:
+ *         description: Funcionário já tem turno nessa data
+ */
 router.post('/', async (req: Request, res: Response) => {
   const { userId, shiftTypeId, date } = req.body
 
@@ -65,6 +134,36 @@ router.post('/', async (req: Request, res: Response) => {
   res.status(201).json(shift)
 })
 
+/**
+ * @openapi
+ * /shifts:
+ *   get:
+ *     summary: Consultar escala semanal ou mensal
+ *     tags: [Turnos]
+ *     parameters:
+ *       - in: query
+ *         name: week
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Qualquer data da semana pretendida (ex. 2026-03-23)
+ *       - in: query
+ *         name: month
+ *         schema:
+ *           type: string
+ *         description: Mês no formato YYYY-MM (ex. 2026-03)
+ *     responses:
+ *       200:
+ *         description: Lista de turnos no período
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Shift'
+ *       400:
+ *         description: Parâmetro week ou month obrigatório
+ */
 router.get('/', async (req: Request, res: Response) => {
   const { week, month } = req.query
 
