@@ -20,8 +20,6 @@ import { authenticate } from '../middleware/auth'
  *         email:
  *           type: string
  *           format: email
- *         passwordHash:
- *           type: string
  *         role:
  *           type: string
  *           enum: [ADMIN, MANAGER, EMPLOYEE]
@@ -67,6 +65,19 @@ const toPublic = (user: User): UserPublic => {
   return publicUser
 }
 
+function requireAdmin(req: Request, res: Response, next: Function) {
+  if (req.headers['x-user-role'] !== 'ADMIN') {
+    return res.status(403).json({ message: 'Forbidden: Admins only' })
+  }
+  next()
+}
+
+function getAuthenticatedUser(req: Request) {
+  const userId = req.user?.userId
+  if (!userId || isNaN(userId)) return null
+  return users.find(u => u.id === userId) || null
+}
+
 /**
  * @openapi
  * /users:
@@ -78,15 +89,61 @@ const toPublic = (user: User): UserPublic => {
  *     responses:
  *       200:
  *         description: Lista de utilizadores
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/UserPublic'
  */
 router.get('/', (_req: Request, res: Response) => {
-  res.json(users.map(toPublic))
+  return res.status(200).json(users.map(toPublic))
+})
+
+/**
+ * @openapi
+ * /users/me:
+ *   get:
+ *     tags: [Users]
+ *     summary: Obter o utilizador autenticado
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Utilizador autenticado
+ *       401:
+ *         description: Não autenticado
+ */
+router.get('/me', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req)
+  if (!user) {
+    return res.status(401).json({ message: 'Unauthorized: Authenticated user not found' })
+  }
+  return res.status(200).json(toPublic(user))
+})
+
+/**
+ * @openapi
+ * /users/{id}:
+ *   get:
+ *     tags: [Users]
+ *     summary: Obter um utilizador por id (admin)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Utilizador encontrado
+ *       403:
+ *         description: Sem permissão
+ *       404:
+ *         description: Utilizador não encontrado
+ */
+router.get('/:id', requireAdmin, (req: Request, res: Response) => {
+  const user = users.find(u => u.id === Number(req.params.id))
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' })
+  }
+  return res.status(200).json(toPublic(user))
 })
 
 /**
@@ -115,10 +172,11 @@ router.get('/', (_req: Request, res: Response) => {
  *       409:
  *         description: Email ou número de funcionário já existe
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireAdmin, async (req: Request, res: Response) => {
   const { name, email, employeeNumber, role, category, password } = req.body
 
   const validRoles: UserRole[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
+  const validCategories: UserCategory[] = ['VETERINARIAN', 'NURSE', 'OPERATIONAL', 'ADMINISTRATIVE']
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
   if (typeof name !== 'string' || name.trim() === '') {
@@ -136,8 +194,6 @@ router.post('/', async (req: Request, res: Response) => {
   if (typeof role !== 'string' || !validRoles.includes(role as UserRole)) {
     return res.status(400).json({ message: 'Invalid role' })
   }
-
-  const validCategories: UserCategory[] = ['VETERINARIAN', 'NURSE', 'OPERATIONAL', 'ADMINISTRATIVE']
 
   if (typeof category !== 'string' || !validCategories.includes(category as UserCategory)) {
     return res.status(400).json({ message: 'Invalid category' })
@@ -171,13 +227,71 @@ router.post('/', async (req: Request, res: Response) => {
     role: role as UserRole,
     category: category as UserCategory,
     active: true,
-    createdAt: new Date(),
-    updatedAt: new Date()
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   }
 
   users.push(newUser)
-
   return res.status(201).json(toPublic(newUser))
+})
+
+/**
+ * @openapi
+ * /users/me:
+ *   patch:
+ *     tags: [Users]
+ *     summary: Atualizar o perfil do utilizador autenticado
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 6
+ *     responses:
+ *       200:
+ *         description: Perfil atualizado
+ *       400:
+ *         description: Campos inválidos
+ *       401:
+ *         description: Não autenticado
+ */
+router.patch('/me', async (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req)
+  if (!user) {
+    return res.status(401).json({ message: 'Unauthorized: Authenticated user not found' })
+  }
+
+  const { name, password } = req.body
+
+  if (name === undefined && password === undefined) {
+    return res.status(400).json({ message: 'At least one field must be provided: name or password' })
+  }
+
+  if (name !== undefined) {
+    if (typeof name !== 'string' || name.trim() === '') {
+      return res.status(400).json({ message: 'name must be a non-empty string' })
+    }
+    user.name = name.trim()
+  }
+
+  if (password !== undefined) {
+    if (typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ message: 'password must be at least 6 characters' })
+    }
+    user.passwordHash = await hashPassword(password)
+  }
+
+  user.updatedAt = new Date().toISOString()
+  return res.status(200).json(toPublic(user))
 })
 
 /**
@@ -197,15 +311,15 @@ router.post('/', async (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: Utilizador desativado
+ *       403:
+ *         description: Sem permissão
  *       404:
  *         description: Utilizador não encontrado
  *       409:
  *         description: Utilizador já está desativado
  */
-router.patch('/:id/deactivate', (req: Request, res: Response) => {
-  const { id } = req.params
-
-  const user = users.find(u => u.id === Number(id))
+router.patch('/:id/deactivate', requireAdmin, (req: Request, res: Response) => {
+  const user = users.find(u => u.id === Number(req.params.id))
 
   if (!user) {
     return res.status(404).json({ message: 'User not found' })
@@ -216,7 +330,7 @@ router.patch('/:id/deactivate', (req: Request, res: Response) => {
   }
 
   user.active = false
-
+  user.updatedAt = new Date().toISOString()
   return res.status(200).json(toPublic(user))
 })
 

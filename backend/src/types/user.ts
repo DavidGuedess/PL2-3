@@ -11,8 +11,8 @@ export type User = {
   role: UserRole
   category: UserCategory
   active: boolean
-  createdAt: Date
-  updatedAt: Date
+  createdAt: string
+  updatedAt: string
 }
 
 export type UserPublic = Omit<User, 'passwordHash'>

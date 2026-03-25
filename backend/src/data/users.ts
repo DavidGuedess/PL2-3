@@ -10,8 +10,8 @@ export const users: User[] = [
     role: 'ADMIN',
     category: 'ADMINISTRATIVE',
     active: true,
-    createdAt: new Date(),
-    updatedAt: new Date()
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   },
   {
     id: 2,
@@ -20,10 +20,10 @@ export const users: User[] = [
     email: 'manager@miaw.com',
     passwordHash: '$2a$10$YQs7Z5qZ5Z5Z5Z5Z5Z5Z5uK5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z',
     role: 'MANAGER',
-    category: 'ADMINISTRATIVE',
+    category: 'VETERINARIAN',
     active: true,
-    createdAt: new Date(),
-    updatedAt: new Date()
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   },
   {
     id: 3,
@@ -32,9 +32,9 @@ export const users: User[] = [
     email: 'employee@miaw.com',
     passwordHash: '$2a$10$YQs7Z5qZ5Z5Z5Z5Z5Z5Z5uK5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z',
     role: 'EMPLOYEE',
-    category: 'VETERINARIAN',
+    category: 'NURSE',
     active: true,
-    createdAt: new Date(),
-    updatedAt: new Date()
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   }
 ]
