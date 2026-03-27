@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express'
 import { users } from '../data/users'
 import { User, UserRole, UserCategory, UserPublic } from '../types/user'
 import { hashPassword } from '../utils/password'
-import { authenticate } from '../middleware/auth'
+import { authenticate, requireRole } from '../middleware/auth'
 
 /**
  * @openapi
@@ -65,13 +65,6 @@ const toPublic = (user: User): UserPublic => {
   return publicUser
 }
 
-function requireAdmin(req: Request, res: Response, next: Function) {
-  if (req.headers['x-user-role'] !== 'ADMIN') {
-    return res.status(403).json({ message: 'Forbidden: Admins only' })
-  }
-  next()
-}
-
 function getAuthenticatedUser(req: Request) {
   const userId = req.user?.userId
   if (!userId || isNaN(userId)) return null
@@ -83,14 +76,18 @@ function getAuthenticatedUser(req: Request) {
  * /users:
  *   get:
  *     tags: [Users]
- *     summary: Listar todos os utilizadores
+ *     summary: Listar todos os utilizadores (Admin/Gestor)
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Lista de utilizadores
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
  */
-router.get('/', (_req: Request, res: Response) => {
+router.get('/', requireRole('ADMIN', 'MANAGER'), (_req: Request, res: Response) => {
   return res.status(200).json(users.map(toPublic))
 })
 
@@ -138,7 +135,7 @@ router.get('/me', (req: Request, res: Response) => {
  *       404:
  *         description: Utilizador não encontrado
  */
-router.get('/:id', requireAdmin, (req: Request, res: Response) => {
+router.get('/:id', requireRole('ADMIN'), (req: Request, res: Response) => {
   const user = users.find(u => u.id === Number(req.params.id))
   if (!user) {
     return res.status(404).json({ message: 'User not found' })
@@ -169,10 +166,14 @@ router.get('/:id', requireAdmin, (req: Request, res: Response) => {
  *               $ref: '#/components/schemas/UserPublic'
  *       400:
  *         description: Campos obrigatórios em falta ou inválidos
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN)
  *       409:
  *         description: Email ou número de funcionário já existe
  */
-router.post('/', requireAdmin, async (req: Request, res: Response) => {
+router.post('/', requireRole('ADMIN'), async (req: Request, res: Response) => {
   const { name, email, employeeNumber, role, category, password } = req.body
 
   const validRoles: UserRole[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
@@ -318,7 +319,7 @@ router.patch('/me', async (req: Request, res: Response) => {
  *       409:
  *         description: Utilizador já está desativado
  */
-router.patch('/:id/deactivate', requireAdmin, (req: Request, res: Response) => {
+router.patch('/:id/deactivate', requireRole('ADMIN'), (req: Request, res: Response) => {
   const user = users.find(u => u.id === Number(req.params.id))
 
   if (!user) {

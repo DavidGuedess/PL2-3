@@ -1,8 +1,11 @@
 import { Router, Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
+import { authenticate, requireRole } from '../middleware/auth'
 
 const router = Router()
 const prisma = new PrismaClient()
+
+router.use(authenticate)
 
 function getWeekRange(dateStr: string): { start: Date; end: Date } {
   const base = new Date(dateStr)
@@ -71,8 +74,10 @@ function getMonthRange(monthStr: string): { start: Date; end: Date } {
  * @openapi
  * /shifts:
  *   post:
- *     summary: Atribuir turno a um funcionário numa data
+ *     summary: Atribuir turno a um funcionário numa data (Admin/Gestor)
  *     tags: [Turnos]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -88,12 +93,16 @@ function getMonthRange(monthStr: string): { start: Date; end: Date } {
  *               $ref: '#/components/schemas/Shift'
  *       400:
  *         description: Campos obrigatórios em falta
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
  *       404:
  *         description: Utilizador ou tipo de turno não encontrado
  *       409:
  *         description: Funcionário já tem turno nessa data
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
   const { userId, shiftTypeId, date } = req.body
 
   if (!userId || !shiftTypeId || !date) {
@@ -140,6 +149,8 @@ router.post('/', async (req: Request, res: Response) => {
  *   get:
  *     summary: Consultar escala semanal ou mensal
  *     tags: [Turnos]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: week
@@ -163,6 +174,8 @@ router.post('/', async (req: Request, res: Response) => {
  *                 $ref: '#/components/schemas/Shift'
  *       400:
  *         description: Parâmetro week ou month obrigatório
+ *       401:
+ *         description: Não autenticado
  */
 router.get('/', async (req: Request, res: Response) => {
   const { week, month } = req.query

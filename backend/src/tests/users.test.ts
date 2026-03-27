@@ -5,7 +5,14 @@ import { users } from '../data/users'
 jest.mock('../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
     const userId = req.headers['x-user-id']
-    req.user = { userId: userId ? Number(userId) : NaN, email: '' }
+    const role = req.headers['x-user-role'] || ''
+    req.user = { userId: userId ? Number(userId) : NaN, email: '', role }
+    next()
+  },
+  requireRole: (...roles: string[]) => (req: any, res: any, next: any) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Acesso não autorizado' })
+    }
     next()
   }
 }))
@@ -29,7 +36,7 @@ describe('Users API', () => {
           password: 'secret123'
         })
 
-      const res = await request(app).get('/users')
+      const res = await request(app).get('/users').set('x-user-role', 'ADMIN')
 
       expect(res.status).toBe(200)
       expect(Array.isArray(res.body)).toBe(true)
