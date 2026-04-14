@@ -1,0 +1,232 @@
+import { Router, Request, Response } from 'express'
+import { PrismaClient } from '@prisma/client'
+import { authenticate, requireRole } from '../middleware/auth'
+
+const router = Router()
+const prisma = new PrismaClient()
+
+router.use(authenticate)
+
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     AttendanceRecord:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *         userId:
+ *           type: integer
+ *         type:
+ *           type: string
+ *           enum: [IN, OUT]
+ *         timestamp:
+ *           type: string
+ *           format: date-time
+ *         user:
+ *           type: object
+ *           properties:
+ *             id:
+ *               type: integer
+ *             name:
+ *               type: string
+ *             employeeNumber:
+ *               type: string
+ *     CreateAttendanceInput:
+ *       type: object
+ *       required: [type]
+ *       properties:
+ *         type:
+ *           type: string
+ *           enum: [IN, OUT]
+ *           example: "IN"
+ */
+
+/**
+ * @openapi
+ * /attendance:
+ *   post:
+ *     summary: Registar entrada ou saída do funcionário autenticado
+ *     tags: [Registos de Ponto]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateAttendanceInput'
+ *     responses:
+ *       201:
+ *         description: Registo criado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AttendanceRecord'
+ *       400:
+ *         description: Campo type em falta ou inválido
+ *       401:
+ *         description: Não autenticado
+ */
+router.post('/', async (req: Request, res: Response) => {
+  const { type } = req.body
+  const userId = req.user!.userId
+
+  if (!type || !['IN', 'OUT'].includes(type)) {
+    return res.status(400).json({ message: 'type must be IN or OUT' })
+  }
+
+  const record = await prisma.attendanceRecord.create({
+    data: {
+      userId,
+      type
+    },
+    include: {
+      user: { select: { id: true, name: true, employeeNumber: true } }
+    }
+  })
+
+  res.status(201).json(record)
+})
+
+/**
+ * @openapi
+ * /attendance/me:
+ *   get:
+ *     summary: Consultar o próprio histórico de registos de ponto
+ *     tags: [Registos de Ponto]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Data de início (ex. 2026-04-01)
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Data de fim (ex. 2026-04-30)
+ *     responses:
+ *       200:
+ *         description: Lista de registos de ponto do utilizador autenticado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/AttendanceRecord'
+ *       401:
+ *         description: Não autenticado
+ */
+router.get('/me', async (req: Request, res: Response) => {
+  const userId = req.user!.userId
+  const { from, to } = req.query
+
+  const where: any = { userId }
+  if (from || to) {
+    where.timestamp = {}
+    if (from) where.timestamp.gte = new Date(from as string)
+    if (to) {
+      const toDate = new Date(to as string)
+      toDate.setUTCHours(23, 59, 59, 999)
+      where.timestamp.lte = toDate
+    }
+  }
+
+  const records = await prisma.attendanceRecord.findMany({
+    where,
+    orderBy: { timestamp: 'desc' }
+  })
+
+  res.json(records)
+})
+
+/**
+ * @openapi
+ * /attendance:
+ *   get:
+ *     summary: Monitorizar registos de ponto de um funcionário (Admin/Gestor)
+ *     tags: [Registos de Ponto]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: integer
+ *         description: ID do utilizador a consultar
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Data de início (ex. 2026-04-01)
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Data de fim (ex. 2026-04-30)
+ *     responses:
+ *       200:
+ *         description: Lista de registos de ponto
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/AttendanceRecord'
+ *       400:
+ *         description: Parâmetro userId obrigatório
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
+ *       404:
+ *         description: Utilizador não encontrado
+ */
+router.get('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+  const { userId, from, to } = req.query
+
+  if (!userId) {
+    return res.status(400).json({ message: 'userId query param is required' })
+  }
+
+  const userIdNum = parseInt(userId as string)
+  if (isNaN(userIdNum)) {
+    return res.status(400).json({ message: 'userId must be a valid integer' })
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userIdNum } })
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' })
+  }
+
+  const where: any = { userId: userIdNum }
+  if (from || to) {
+    where.timestamp = {}
+    if (from) where.timestamp.gte = new Date(from as string)
+    if (to) {
+      const toDate = new Date(to as string)
+      toDate.setUTCHours(23, 59, 59, 999)
+      where.timestamp.lte = toDate
+    }
+  }
+
+  const records = await prisma.attendanceRecord.findMany({
+    where,
+    include: {
+      user: { select: { id: true, name: true, employeeNumber: true } }
+    },
+    orderBy: { timestamp: 'desc' }
+  })
+
+  res.json(records)
+})
+
+export default router
