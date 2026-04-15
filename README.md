@@ -1,4 +1,4 @@
-# MiawGenda
+# MiauGenda
 
 Sistema de Gestão de Turnos para Clínica Veterinária
 LES 2025/26 - Tema T9 | Equipa PL2-4

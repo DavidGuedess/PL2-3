@@ -8,6 +8,7 @@ export type User = {
   name: string
   email: string
   passwordHash: string
+  contact?: string
   role: UserRole
   category: UserCategory
   active: boolean

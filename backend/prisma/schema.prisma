@@ -26,6 +26,7 @@ model User {
   name           String
   email          String         @unique
   passwordHash   String
+  contact        String?
   role           Role           @default(EMPLOYEE)
   category       Category
   active         Boolean        @default(true)

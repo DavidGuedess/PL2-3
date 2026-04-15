@@ -1,6 +1,5 @@
 import request from 'supertest'
 import app from '../app'
-import { users } from '../data/users'
 
 jest.mock('../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
@@ -32,17 +31,16 @@ jest.mock('@prisma/client', () => {
       create: jest.fn()
     },
     user: {
-      findUnique: jest.fn().mockResolvedValue(null)
+      findMany: jest.fn().mockResolvedValue([]),
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest.fn(),
+      update: jest.fn()
     }
   }
   return { PrismaClient: jest.fn(() => mockInstance) }
 })
 
 describe('RBAC - Controlo de acesso por papel', () => {
-
-  beforeEach(() => {
-    users.length = 0
-  })
 
   // ===========================
   // Users - ADMIN only

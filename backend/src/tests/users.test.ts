@@ -1,6 +1,18 @@
 import request from 'supertest'
 import app from '../app'
-import { users } from '../data/users'
+import { PrismaClient } from '@prisma/client'
+
+jest.mock('@prisma/client', () => {
+  const mockInstance = {
+    user: {
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    }
+  }
+  return { PrismaClient: jest.fn(() => mockInstance) }
+})
 
 jest.mock('../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
@@ -17,56 +29,69 @@ jest.mock('../middleware/auth', () => ({
   }
 }))
 
+const mockUser = {
+  id: 1,
+  employeeNumber: 'TEST001',
+  name: 'Test User',
+  email: 'test@test.com',
+  passwordHash: '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
+  contact: null,
+  role: 'EMPLOYEE',
+  category: 'VETERINARIAN',
+  active: true,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+}
+
+let mockFindMany: jest.Mock
+let mockFindUnique: jest.Mock
+let mockCreate: jest.Mock
+let mockUpdate: jest.Mock
+
+beforeAll(() => {
+  const prismaInstance = (PrismaClient as jest.Mock).mock.results[0]?.value
+  mockFindMany = prismaInstance?.user?.findMany
+  mockFindUnique = prismaInstance?.user?.findUnique
+  mockCreate = prismaInstance?.user?.create
+  mockUpdate = prismaInstance?.user?.update
+})
+
+beforeEach(() => {
+  jest.clearAllMocks()
+})
+
 describe('Users API', () => {
-  beforeEach(() => {
-    users.length = 0
-  })
 
   describe('GET /users', () => {
     it('should return all users without passwordHash field', async () => {
-      await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'List User',
-          email: 'listuser@test.com',
-          employeeNumber: 'LIST001',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
+      mockFindMany.mockResolvedValue([mockUser])
 
       const res = await request(app).get('/users').set('x-user-role', 'ADMIN')
 
       expect(res.status).toBe(200)
       expect(Array.isArray(res.body)).toBe(true)
       expect(res.body[0].passwordHash).toBeUndefined()
+      expect(res.body[0].email).toBe('test@test.com')
+    })
+
+    it('should return 403 if non-admin tries to list users', async () => {
+      const res = await request(app).get('/users').set('x-user-role', 'EMPLOYEE')
+
+      expect(res.status).toBe(403)
     })
   })
 
   describe('GET /users/me', () => {
     it('should return the authenticated user', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'Me User',
-          email: 'me@test.com',
-          employeeNumber: 'ME001',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
-
-      const userId = createRes.body.id
+      mockFindUnique.mockResolvedValue(mockUser)
 
       const res = await request(app)
         .get('/users/me')
-        .set('x-user-id', userId)
+        .set('x-user-id', '1')
 
       expect(res.status).toBe(200)
-      expect(res.body.id).toBe(userId)
-      expect(res.body.email).toBe('me@test.com')
+      expect(res.body.id).toBe(1)
+      expect(res.body.email).toBe('test@test.com')
       expect(res.body.passwordHash).toBeUndefined()
     })
 
@@ -79,30 +104,20 @@ describe('Users API', () => {
 
   describe('GET /users/:id', () => {
     it('should return a user by id for admin', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'Target User',
-          email: 'target@test.com',
-          employeeNumber: 'TARGET001',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
-
-      const userId = createRes.body.id
+      mockFindUnique.mockResolvedValue(mockUser)
 
       const res = await request(app)
-        .get(`/users/${userId}`)
+        .get('/users/1')
         .set('x-user-role', 'ADMIN')
 
       expect(res.status).toBe(200)
-      expect(res.body.id).toBe(userId)
+      expect(res.body.id).toBe(1)
       expect(res.body.passwordHash).toBeUndefined()
     })
 
     it('should return 404 if user does not exist', async () => {
+      mockFindUnique.mockResolvedValue(null)
+
       const res = await request(app)
         .get('/users/99999')
         .set('x-user-role', 'ADMIN')
@@ -112,7 +127,7 @@ describe('Users API', () => {
 
     it('should return 403 if non-admin tries to get user by id', async () => {
       const res = await request(app)
-        .get('/users/99999')
+        .get('/users/1')
         .set('x-user-role', 'EMPLOYEE')
 
       expect(res.status).toBe(403)
@@ -121,6 +136,8 @@ describe('Users API', () => {
 
   describe('POST /users', () => {
     it('should create a new user', async () => {
+      mockCreate.mockResolvedValue({ ...mockUser, email: 'testuser1@test.com', employeeNumber: 'TEST001' })
+
       const res = await request(app)
         .post('/users')
         .set('x-user-role', 'ADMIN')
@@ -144,9 +161,7 @@ describe('Users API', () => {
       const res = await request(app)
         .post('/users')
         .set('x-user-role', 'ADMIN')
-        .send({
-          email: 'missing@test.com'
-        })
+        .send({ email: 'missing@test.com' })
 
       expect(res.status).toBe(400)
     })
@@ -216,43 +231,41 @@ describe('Users API', () => {
     })
 
     it('should fail if email already exists', async () => {
-      const user = {
-        name: 'Duplicate Email',
-        email: 'duplicate@test.com',
-        employeeNumber: 'TEST004',
-        role: 'EMPLOYEE',
-        category: 'VETERINARIAN',
-        password: 'secret123'
-      }
-
-      await request(app).post('/users').set('x-user-role', 'ADMIN').send(user)
+      mockCreate.mockRejectedValue({ code: 'P2002', meta: { target: ['email'] } })
 
       const res = await request(app)
         .post('/users')
         .set('x-user-role', 'ADMIN')
-        .send({ ...user, employeeNumber: 'TEST005' })
+        .send({
+          name: 'Duplicate Email',
+          email: 'duplicate@test.com',
+          employeeNumber: 'TEST004',
+          role: 'EMPLOYEE',
+          category: 'VETERINARIAN',
+          password: 'secret123'
+        })
 
       expect(res.status).toBe(409)
+      expect(res.body.message).toBe('Email already exists')
     })
 
     it('should fail if employee number already exists', async () => {
-      const user = {
-        name: 'Duplicate Employee',
-        email: 'employee@test.com',
-        employeeNumber: 'TEST006',
-        role: 'EMPLOYEE',
-        category: 'VETERINARIAN',
-        password: 'secret123'
-      }
-
-      await request(app).post('/users').set('x-user-role', 'ADMIN').send(user)
+      mockCreate.mockRejectedValue({ code: 'P2002', meta: { target: ['employeeNumber'] } })
 
       const res = await request(app)
         .post('/users')
         .set('x-user-role', 'ADMIN')
-        .send({ ...user, email: 'newemail@test.com' })
+        .send({
+          name: 'Duplicate Employee',
+          email: 'employee@test.com',
+          employeeNumber: 'TEST006',
+          role: 'EMPLOYEE',
+          category: 'VETERINARIAN',
+          password: 'secret123'
+        })
 
       expect(res.status).toBe(409)
+      expect(res.body.message).toBe('Employee number already exists')
     })
 
     it('should return 403 if non-admin tries to create a user', async () => {
@@ -274,22 +287,11 @@ describe('Users API', () => {
 
   describe('PATCH /users/:id/deactivate', () => {
     it('should deactivate a user', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'Deactivate User',
-          email: 'deactivate@test.com',
-          employeeNumber: 'TEST007',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
-
-      const userId = createRes.body.id
+      mockFindUnique.mockResolvedValue(mockUser)
+      mockUpdate.mockResolvedValue({ ...mockUser, active: false })
 
       const res = await request(app)
-        .patch(`/users/${userId}/deactivate`)
+        .patch('/users/1/deactivate')
         .set('x-user-role', 'ADMIN')
 
       expect(res.status).toBe(200)
@@ -298,6 +300,8 @@ describe('Users API', () => {
     })
 
     it('should fail if user does not exist', async () => {
+      mockFindUnique.mockResolvedValue(null)
+
       const res = await request(app)
         .patch('/users/99999/deactivate')
         .set('x-user-role', 'ADMIN')
@@ -306,46 +310,18 @@ describe('Users API', () => {
     })
 
     it('should fail if user is already deactivated', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'Already Deactivated',
-          email: 'already@test.com',
-          employeeNumber: 'TEST008',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
-
-      const userId = createRes.body.id
-
-      await request(app).patch(`/users/${userId}/deactivate`).set('x-user-role', 'ADMIN')
+      mockFindUnique.mockResolvedValue({ ...mockUser, active: false })
 
       const res = await request(app)
-        .patch(`/users/${userId}/deactivate`)
+        .patch('/users/1/deactivate')
         .set('x-user-role', 'ADMIN')
 
       expect(res.status).toBe(409)
     })
 
     it('should return 403 if non-admin tries to deactivate a user', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'Protected User',
-          email: 'protected@test.com',
-          employeeNumber: 'TEST011',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
-
-      const userId = createRes.body.id
-
       const res = await request(app)
-        .patch(`/users/${userId}/deactivate`)
+        .patch('/users/1/deactivate')
         .set('x-user-role', 'EMPLOYEE')
 
       expect(res.status).toBe(403)
@@ -354,23 +330,12 @@ describe('Users API', () => {
 
   describe('PATCH /users/me', () => {
     it('should update the authenticated user name', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'Old Name',
-          email: 'patch1@test.com',
-          employeeNumber: 'PATCH001',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
-
-      const userId = createRes.body.id
+      mockFindUnique.mockResolvedValue(mockUser)
+      mockUpdate.mockResolvedValue({ ...mockUser, name: 'New Name' })
 
       const res = await request(app)
         .patch('/users/me')
-        .set('x-user-id', userId)
+        .set('x-user-id', '1')
         .send({ name: 'New Name' })
 
       expect(res.status).toBe(200)
@@ -378,24 +343,27 @@ describe('Users API', () => {
       expect(res.body.passwordHash).toBeUndefined()
     })
 
-    it('should update the authenticated user password without returning it', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'Password User',
-          email: 'patch3@test.com',
-          employeeNumber: 'PATCH003',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
-
-      const userId = createRes.body.id
+    it('should update the authenticated user contact', async () => {
+      mockFindUnique.mockResolvedValue(mockUser)
+      mockUpdate.mockResolvedValue({ ...mockUser, contact: '+351912345678' })
 
       const res = await request(app)
         .patch('/users/me')
-        .set('x-user-id', userId)
+        .set('x-user-id', '1')
+        .send({ contact: '+351912345678' })
+
+      expect(res.status).toBe(200)
+      expect(res.body.contact).toBe('+351912345678')
+      expect(res.body.passwordHash).toBeUndefined()
+    })
+
+    it('should update the authenticated user password without returning it', async () => {
+      mockFindUnique.mockResolvedValue(mockUser)
+      mockUpdate.mockResolvedValue(mockUser)
+
+      const res = await request(app)
+        .patch('/users/me')
+        .set('x-user-id', '1')
         .send({ password: 'newpassword456' })
 
       expect(res.status).toBe(200)
@@ -403,94 +371,59 @@ describe('Users API', () => {
     })
 
     it('should update multiple fields of the authenticated user', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'Multi User',
-          email: 'patch4@test.com',
-          employeeNumber: 'PATCH004',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
-
-      const userId = createRes.body.id
+      mockFindUnique.mockResolvedValue(mockUser)
+      mockUpdate.mockResolvedValue({ ...mockUser, name: 'Updated Multi User', contact: '+351911111111' })
 
       const res = await request(app)
         .patch('/users/me')
-        .set('x-user-id', userId)
-        .send({ name: 'Updated Multi User', password: 'updatedpassword' })
+        .set('x-user-id', '1')
+        .send({ name: 'Updated Multi User', contact: '+351911111111', password: 'updatedpassword' })
 
       expect(res.status).toBe(200)
       expect(res.body.name).toBe('Updated Multi User')
+      expect(res.body.contact).toBe('+351911111111')
       expect(res.body.passwordHash).toBeUndefined()
     })
 
     it('should return 400 if no fields are provided', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'Empty Patch',
-          email: 'patch5@test.com',
-          employeeNumber: 'PATCH005',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
-
-      const userId = createRes.body.id
+      mockFindUnique.mockResolvedValue(mockUser)
 
       const res = await request(app)
         .patch('/users/me')
-        .set('x-user-id', userId)
+        .set('x-user-id', '1')
         .send({})
 
       expect(res.status).toBe(400)
     })
 
     it('should return 400 for invalid name', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'Invalid Name',
-          email: 'patch6@test.com',
-          employeeNumber: 'PATCH006',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
-
-      const userId = createRes.body.id
+      mockFindUnique.mockResolvedValue(mockUser)
 
       const res = await request(app)
         .patch('/users/me')
-        .set('x-user-id', userId)
+        .set('x-user-id', '1')
         .send({ name: '' })
 
       expect(res.status).toBe(400)
     })
 
-    it('should return 400 for invalid password', async () => {
-      const createRes = await request(app)
-        .post('/users')
-        .set('x-user-role', 'ADMIN')
-        .send({
-          name: 'Invalid Password',
-          email: 'patch8@test.com',
-          employeeNumber: 'PATCH008',
-          role: 'EMPLOYEE',
-          category: 'VETERINARIAN',
-          password: 'secret123'
-        })
-
-      const userId = createRes.body.id
+    it('should return 400 for invalid contact', async () => {
+      mockFindUnique.mockResolvedValue(mockUser)
 
       const res = await request(app)
         .patch('/users/me')
-        .set('x-user-id', userId)
+        .set('x-user-id', '1')
+        .send({ contact: '' })
+
+      expect(res.status).toBe(400)
+    })
+
+    it('should return 400 for invalid password', async () => {
+      mockFindUnique.mockResolvedValue(mockUser)
+
+      const res = await request(app)
+        .patch('/users/me')
+        .set('x-user-id', '1')
         .send({ password: '123' })
 
       expect(res.status).toBe(400)
