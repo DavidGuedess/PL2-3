@@ -36,11 +36,14 @@ data class UserSummary(
 )
 
 data class AttendanceRecord(
-    val id: Int,
-    val userId: Int,
-    val type: String,
-    val timestamp: String
+    val id: String,
+    val userId: String,
+    val date: String,
+    val checkIn: String,
+    val checkOut: String?,
+    val createdAt: String
 )
+
 
 data class LoginRequest(
     val employeeNumber: String,
