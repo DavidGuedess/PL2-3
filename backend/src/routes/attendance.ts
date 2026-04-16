@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticate, requireRole } from '../middleware/auth'
+import { createAttendance, getMyAttendance } from '../controllers/attendanceController'
 
 const router = Router()
 const prisma = new PrismaClient()
@@ -69,26 +70,7 @@ router.use(authenticate)
  *       401:
  *         description: Não autenticado
  */
-router.post('/', async (req: Request, res: Response) => {
-  const { type } = req.body
-  const userId = req.user!.userId
-
-  if (!type || !['IN', 'OUT'].includes(type)) {
-    return res.status(400).json({ message: 'type must be IN or OUT' })
-  }
-
-  const record = await prisma.attendanceRecord.create({
-    data: {
-      userId,
-      type
-    },
-    include: {
-      user: { select: { id: true, name: true, employeeNumber: true } }
-    }
-  })
-
-  res.status(201).json(record)
-})
+router.post('/', createAttendance)
 
 /**
  * @openapi
@@ -123,28 +105,7 @@ router.post('/', async (req: Request, res: Response) => {
  *       401:
  *         description: Não autenticado
  */
-router.get('/me', async (req: Request, res: Response) => {
-  const userId = req.user!.userId
-  const { from, to } = req.query
-
-  const where: any = { userId }
-  if (from || to) {
-    where.timestamp = {}
-    if (from) where.timestamp.gte = new Date(from as string)
-    if (to) {
-      const toDate = new Date(to as string)
-      toDate.setUTCHours(23, 59, 59, 999)
-      where.timestamp.lte = toDate
-    }
-  }
-
-  const records = await prisma.attendanceRecord.findMany({
-    where,
-    orderBy: { timestamp: 'desc' }
-  })
-
-  res.json(records)
-})
+router.get('/me', getMyAttendance)
 
 /**
  * @openapi
@@ -197,20 +158,27 @@ router.get('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Respo
     return res.status(400).json({ message: 'userId query param is required' })
   }
 
-  const userIdNum = parseInt(userId as string)
-  if (isNaN(userIdNum)) {
+  const userIdNum = Number(userId)
+
+  if (!Number.isInteger(userIdNum) || userIdNum <= 0) {
     return res.status(400).json({ message: 'userId must be a valid integer' })
   }
 
   const user = await prisma.user.findUnique({ where: { id: userIdNum } })
+
   if (!user) {
     return res.status(404).json({ message: 'User not found' })
   }
 
   const where: any = { userId: userIdNum }
+
   if (from || to) {
     where.timestamp = {}
-    if (from) where.timestamp.gte = new Date(from as string)
+
+    if (from) {
+      where.timestamp.gte = new Date(from as string)
+    }
+
     if (to) {
       const toDate = new Date(to as string)
       toDate.setUTCHours(23, 59, 59, 999)
@@ -221,12 +189,18 @@ router.get('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Respo
   const records = await prisma.attendanceRecord.findMany({
     where,
     include: {
-      user: { select: { id: true, name: true, employeeNumber: true } }
+      user: {
+        select: {
+          id: true,
+          name: true,
+          employeeNumber: true
+        }
+      }
     },
     orderBy: { timestamp: 'desc' }
   })
 
-  res.json(records)
+  return res.status(200).json(records)
 })
 
 export default router
