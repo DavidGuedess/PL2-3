@@ -47,18 +47,12 @@ interface ShiftService {
 interface AttendanceService {
     @POST("attendance")
     suspend fun register(
-        @retrofit2.http.Header("x-user-id") userId: String,
+        @retrofit2.http.Header("Authorization") authorization: String,
         @Body body: Map<String, String>
     ): Response<AttendanceRecord>
 
     @GET("attendance/me")
     suspend fun getMyHistory(
-        @retrofit2.http.Header("x-user-id") userId: String
+        @retrofit2.http.Header("Authorization") authorization: String
     ): Response<List<AttendanceRecord>>
-
-    @PATCH("attendance/me/checkout")
-    suspend fun checkout(
-        @retrofit2.http.Header("x-user-id") userId: String,
-        @Body body: Map<String, String>
-    ): Response<AttendanceRecord>
 }
