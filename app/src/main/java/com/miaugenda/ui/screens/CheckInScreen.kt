@@ -1,27 +1,42 @@
 package com.miaugenda.ui.screens
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import android.content.Intent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.miaugenda.MainActivity
 import com.miaugenda.data.api.AttendanceService
 import com.miaugenda.data.api.RetrofitClient
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import android.content.Intent
-import com.miaugenda.MainActivity
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,43 +52,47 @@ fun CheckInScreen() {
         RetrofitClient.create(context).create(AttendanceService::class.java)
     }
 
-    /* Para testar as gateways pq ainda n está conectado a bd */
-    val mockUserId = "13e8d266-ace1-4850-8fb5-58db1d8537c4"
+    // Token mock temporário enquanto ainda não existe login no frontend
+    val mockToken =
+        "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImVtYWlsIjoiYWRtaW5AbWlhdy5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3NzYzNjMyNjMsImV4cCI6MTc3NjM2NDE2M30.mhEnAoBP3xtQyHLA3mD29ZUs2lLC3qRnKdP69zt76C4"
 
     val currentDate = LocalDate.now()
     val currentTime = LocalTime.now()
 
     val displayDateFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy")
-    val apiDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
     val displayDate = currentDate.format(displayDateFormatter)
-    val apiDate = currentDate.format(apiDateFormatter)
-    val apiTime = currentTime.format(timeFormatter)
+    val displayTime = currentTime.format(timeFormatter)
+
+    fun loadMyAttendanceHistory() {
+        scope.launch {
+            isLoading = true
+            message = null
+
+            try {
+                val response = attendanceService.getMyHistory(mockToken)
+
+                if (response.isSuccessful) {
+                    val records = response.body().orEmpty()
+                    val lastRecord = records.firstOrNull()
+
+                    isWorking = lastRecord?.type == "IN"
+                } else if (response.code() == 401) {
+                    message = "Utilizador não autorizado"
+                } else {
+                    message = "Erro ao carregar histórico"
+                }
+            } catch (_: Exception) {
+                message = "Erro de ligação ao servidor"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
-        isLoading = true
-        message = null
-
-        try {
-            val response = attendanceService.getMyHistory(mockUserId)
-
-            if (response.isSuccessful) {
-                val attendances = response.body().orEmpty()
-
-                val todayAttendance = attendances.find {
-                    it.date == apiDate && it.checkOut == null
-                }
-
-                isWorking = todayAttendance != null
-            } else {
-                message = "Erro ao carregar histórico"
-            }
-        } catch (_: Exception) {
-            message = "Erro de ligação ao servidor"
-        } finally {
-            isLoading = false
-        }
+        loadMyAttendanceHistory()
     }
 
     Scaffold(
@@ -81,11 +100,13 @@ fun CheckInScreen() {
             TopAppBar(
                 title = { Text("Check-In") },
                 navigationIcon = {
-                    IconButton(onClick = {
-                        val intent = Intent(context, MainActivity::class.java)
-                        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        context.startActivity(intent)
-                    }) {
+                    IconButton(
+                        onClick = {
+                            val intent = Intent(context, MainActivity::class.java)
+                            intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            context.startActivity(intent)
+                        }
+                    ) {
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Voltar"
@@ -104,18 +125,23 @@ fun CheckInScreen() {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-
-            Text(text = displayDate, fontSize = 18.sp)
+            Text(
+                text = displayDate,
+                fontSize = 18.sp
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Text(text = apiTime, fontSize = 32.sp)
+            Text(
+                text = displayTime,
+                fontSize = 32.sp
+            )
 
             Spacer(modifier = Modifier.height(24.dp))
 
             Text(
                 text = if (isWorking) "Em serviço" else "Fora de serviço",
-                color = if (isWorking) Color.Green else Color.Red,
+                color = if (isWorking) Color(0xFF2E7D32) else Color.Red,
                 fontSize = 20.sp
             )
 
@@ -138,64 +164,26 @@ fun CheckInScreen() {
                         message = null
 
                         try {
-                            if (!isWorking) {
-                                val body = mapOf(
-                                    "date" to apiDate,
-                                    "checkIn" to apiTime
-                                )
+                            val typeToSend = if (isWorking) "OUT" else "IN"
 
-                                val response = attendanceService.register(mockUserId, body)
+                            val response = attendanceService.register(
+                                mockToken,
+                                mapOf("type" to typeToSend)
+                            )
 
-                                if (response.isSuccessful) {
-                                    isWorking = true
-                                    message = "Entrada registada com sucesso"
-                                } else if (response.code() == 409) {
-                                    val historyResponse = attendanceService.getMyHistory(mockUserId)
-
-                                    if (historyResponse.isSuccessful) {
-                                        val attendances = historyResponse.body().orEmpty()
-
-                                        val todayOpenAttendance = attendances.find {
-                                            it.date == apiDate && it.checkOut == null
-                                        }
-
-                                        isWorking = todayOpenAttendance != null
-
-                                        message = if (isWorking) {
-                                            "Já existe registo aberto para hoje"
-                                        } else {
-                                            "Já existe registo fechado para hoje"
-                                        }
-                                    } else {
-                                        message = "Já existe registo para hoje"
-                                    }
-                                } else if (response.code() == 400) {
-                                    message = "Dados inválidos"
-                                } else if (response.code() == 401) {
-                                    message = "Utilizador não autorizado"
+                            if (response.isSuccessful) {
+                                isWorking = !isWorking
+                                message = if (typeToSend == "IN") {
+                                    "Entrada registada com sucesso"
                                 } else {
-                                    message = "Erro ao registar entrada"
+                                    "Saída registada com sucesso"
                                 }
+                            } else if (response.code() == 400) {
+                                message = "Sequência inválida de registo"
+                            } else if (response.code() == 401) {
+                                message = "Utilizador não autorizado"
                             } else {
-                                val body = mapOf(
-                                    "date" to apiDate,
-                                    "checkOut" to apiTime
-                                )
-
-                                val response = attendanceService.checkout(mockUserId, body)
-
-                                if (response.isSuccessful) {
-                                    isWorking = false
-                                    message = "Saída registada com sucesso"
-                                } else if (response.code() == 404) {
-                                    message = "Não foi encontrado registo aberto para hoje"
-                                } else if (response.code() == 400) {
-                                    message = "Dados inválidos"
-                                } else if (response.code() == 401) {
-                                    message = "Utilizador não autorizado"
-                                } else {
-                                    message = "Erro ao registar saída"
-                                }
+                                message = "Erro ao registar ponto"
                             }
                         } catch (_: Exception) {
                             message = "Erro de ligação ao servidor"
@@ -208,7 +196,7 @@ fun CheckInScreen() {
                 enabled = !isLoading
             ) {
                 Text(
-                    when {
+                    text = when {
                         isLoading -> "A processar..."
                         isWorking -> "Sair"
                         else -> "Entrar"
