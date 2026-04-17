@@ -224,3 +224,10 @@ Novos ficheiros: `backend/src/routes/shiftTypes.ts`, `backend/src/routes/shifts.
 
 - Documentação Swagger atualizada com `security: bearerAuth` e respostas `401`/`403` em todos os endpoints protegidos
 - Criado `tests/rbac.test.ts` com testes de autorização (403 para papéis incorretos, acesso confirmado para papéis corretos)
+
+
+# SCRUM-115 "Registo de ponto"
+- Implementado endpoint POST /attendance para registo de entradas/saídas.
+- Implementado endpoint GET /attendance/me para consulta do histórico do utilizador autenticado.
+- Adicionada validação da sequência IN/OUT para garantir consistência dos registos.
+- Integração com Prisma/PostgreSQL e validação através de testes manuais (Postman).
