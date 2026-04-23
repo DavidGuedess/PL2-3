@@ -225,6 +225,13 @@ Novos ficheiros: `backend/src/routes/shiftTypes.ts`, `backend/src/routes/shifts.
 - Documentação Swagger atualizada com `security: bearerAuth` e respostas `401`/`403` em todos os endpoints protegidos
 - Criado `tests/rbac.test.ts` com testes de autorização (403 para papéis incorretos, acesso confirmado para papéis corretos)
 
+# SCRUM-114 "Ecrã Login"
+- Campo para número de funcionário
+- Campo para password (com toggle de visibilidade)
+- Validação de campos obrigatórios
+- Mensagens de erro
+- Loading state durante autenticação
+- Integração com API `/api/auth/login`
 
 # SCRUM-115 "Registo de ponto"
 - Implementado endpoint POST /attendance para registo de entradas/saídas.
