@@ -11,6 +11,7 @@ object RetrofitClient {
     private var authInterceptor: AuthInterceptor? = null
     private var retrofitInstance: Retrofit? = null
     private var authApiInstance: AuthApi? = null
+    private var shiftApiInstance: ShiftApi? = null
     
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = if (BuildConfig.DEBUG) {
@@ -48,6 +49,7 @@ object RetrofitClient {
         // Reset instances para recriar com novo interceptor
         retrofitInstance = null
         authApiInstance = null
+        shiftApiInstance = null
     }
 
     val authApi: AuthApi
@@ -56,5 +58,13 @@ object RetrofitClient {
                 authApiInstance = getRetrofit().create(AuthApi::class.java)
             }
             return authApiInstance!!
+        }
+
+    val shiftApi: ShiftApi
+        get() {
+            if (shiftApiInstance == null) {
+                shiftApiInstance = getRetrofit().create(ShiftApi::class.java)
+            }
+            return shiftApiInstance!!
         }
 }
