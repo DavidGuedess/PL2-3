@@ -1,0 +1,58 @@
+package pt.ualg.miaugenda.navigation
+
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import pt.ualg.miaugenda.MiauGendaApp
+import pt.ualg.miaugenda.ui.screen.dashboard.DashboardScreen
+import pt.ualg.miaugenda.ui.screen.login.LoginScreen
+
+sealed class Screen(val route: String) {
+    object Login : Screen("login")
+    object Dashboard : Screen("dashboard")
+}
+
+@Composable
+fun NavGraph(
+    navController: NavHostController,
+    startDestination: String
+) {
+    NavHost(
+        navController = navController,
+        startDestination = startDestination
+    ) {
+        composable(Screen.Login.route) {
+            LoginScreen(
+                onLoginSuccess = {
+                    navController.navigate(Screen.Dashboard.route) {
+                        popUpTo(Screen.Login.route) { inclusive = true }
+                    }
+                }
+            )
+        }
+        
+        composable(Screen.Dashboard.route) {
+            DashboardScreen(
+                onLogout = {
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun getStartDestination(): String {
+    val context = LocalContext.current
+    val tokenManager = MiauGendaApp.getTokenManager(context)
+    
+    return if (tokenManager.isLoggedIn()) {
+        Screen.Dashboard.route
+    } else {
+        Screen.Login.route
+    }
+}
