@@ -20,7 +20,8 @@ jest.mock('@prisma/client', () => {
   const mockInstance = {
     attendanceRecord: {
       create: jest.fn(),
-      findMany: jest.fn()
+      findMany: jest.fn(),
+      findFirst: jest.fn()
     },
     user: {
       findUnique: jest.fn()
@@ -34,6 +35,7 @@ import { PrismaClient } from '@prisma/client'
 const prismaInstance = new (PrismaClient as any)()
 const mockCreate = prismaInstance.attendanceRecord.create as jest.Mock
 const mockFindMany = prismaInstance.attendanceRecord.findMany as jest.Mock
+const mockFindFirst = prismaInstance.attendanceRecord.findFirst as jest.Mock
 const mockUserFindUnique = prismaInstance.user.findUnique as jest.Mock
 
 const mockRecord = {
@@ -57,6 +59,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockCreate.mockResolvedValue(mockRecord)
   mockFindMany.mockResolvedValue([mockRecord])
+  mockFindFirst.mockResolvedValue(null)
   mockUserFindUnique.mockResolvedValue(mockUser)
 })
 
@@ -73,6 +76,7 @@ describe('POST /attendance', () => {
   })
 
   it('deve registar saída (OUT) para funcionário autenticado', async () => {
+    mockFindFirst.mockResolvedValueOnce({ ...mockRecord, type: 'IN' })
     mockCreate.mockResolvedValueOnce({ ...mockRecord, type: 'OUT' })
 
     const res = await request(app)
