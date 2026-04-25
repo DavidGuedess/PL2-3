@@ -1,0 +1,13 @@
+package pt.ualg.miaugenda.data.remote
+
+import pt.ualg.miaugenda.data.model.Shift
+import retrofit2.Response
+import retrofit2.http.GET
+import retrofit2.http.Query
+
+interface ShiftApi {
+    @GET("/shifts")
+    suspend fun getShifts(
+        @Query("week") week: String? = null
+    ): Response<List<Shift>>
+}
