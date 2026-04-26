@@ -22,6 +22,7 @@ import pt.ualg.miaugenda.data.model.Shift
 @Composable
 fun DashboardScreen(
     onLogout: () -> Unit = {},
+    onCheckInClick: () -> Unit = {},
     viewModel: DashboardViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -85,7 +86,6 @@ fun DashboardScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // Card com dados do utilizador
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -103,19 +103,31 @@ fun DashboardScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Card com próximo turno
+            Button(
+                onClick = onCheckInClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Registar entrada/saída")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             when {
                 uiState.isLoading -> {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Box(
-                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .fillMaxWidth(),
                             contentAlignment = Alignment.Center
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(24.dp))
                         }
                     }
                 }
+
                 uiState.nextShift != null -> NextShiftCard(shift = uiState.nextShift!!)
+
                 else -> NoShiftCard()
             }
         }
@@ -140,7 +152,9 @@ private fun NextShiftCard(shift: Shift) {
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier.size(32.dp)
             )
+
             Spacer(modifier = Modifier.width(12.dp))
+
             Column {
                 Text(
                     text = "Próximo Turno",
