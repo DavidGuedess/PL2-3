@@ -145,6 +145,64 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Resp
 
 /**
  * @openapi
+ * /shifts/me:
+ *   get:
+ *     summary: Consultar os próprios turnos (semana ou mês)
+ *     tags: [Turnos]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: week
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Qualquer data da semana pretendida (ex. 2026-03-23)
+ *       - in: query
+ *         name: month
+ *         schema:
+ *           type: string
+ *         description: Mês no formato YYYY-MM (ex. 2026-03)
+ *     responses:
+ *       200:
+ *         description: Lista dos turnos do utilizador autenticado no período
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Shift'
+ *       400:
+ *         description: Parâmetro week ou month obrigatório
+ *       401:
+ *         description: Não autenticado
+ */
+router.get('/me', async (req: Request, res: Response) => {
+  const { week, month } = req.query
+
+  if (!week && !month) {
+    return res.status(400).json({
+      message: 'Query param week or month is required (e.g. ?week=2026-03-23 or ?month=2026-03)'
+    })
+  }
+
+  const { start, end } = week
+    ? getWeekRange(week as string)
+    : getMonthRange(month as string)
+
+  const userId = req.user!.userId
+
+  const shifts = await prisma.shift.findMany({
+    where: { userId, date: { gte: start, lte: end } },
+    include: { shiftType: true },
+    orderBy: { date: 'asc' }
+  })
+
+  res.json(shifts)
+})
+
+/**
+ * @openapi
  * /shifts:
  *   get:
  *     summary: Consultar escala semanal ou mensal

@@ -225,6 +225,25 @@ Novos ficheiros: `backend/src/routes/shiftTypes.ts`, `backend/src/routes/shifts.
 - Documentação Swagger atualizada com `security: bearerAuth` e respostas `401`/`403` em todos os endpoints protegidos
 - Criado `tests/rbac.test.ts` com testes de autorização (403 para papéis incorretos, acesso confirmado para papéis corretos)
 
+---
+
+### SCRUM-143 — Endpoint de horário pessoal (Sprint 3)
+
+- Novo endpoint `GET /shifts/me` — devolve os turnos do utilizador autenticado
+- Suporta filtros `?week=YYYY-MM-DD` (semana) e `?month=YYYY-MM` (mês)
+- Retorna informação completa do `ShiftType` (nome, hora de início e fim)
+- O utilizador só consegue ver os seus próprios turnos — `userId` extraído do token JWT
+- Retorna `400` se nenhum filtro for fornecido
+- Adicionados testes unitários em `shifts.test.ts` (6 casos de teste)
+- Corrigido bug no mock do `attendance.test.ts` (faltava `findFirst`)
+- `swagger-ui-express` adicionado como dependência explícita no `package.json`
+
+| Endpoint | Papéis permitidos |
+|---|---|
+| `GET /shifts/me` | todos |
+
+---
+
 # SCRUM-114 "Ecrã Login"
 - Campo para número de funcionário
 - Campo para password (com toggle de visibilidade)
