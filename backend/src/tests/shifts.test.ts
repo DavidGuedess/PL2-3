@@ -21,7 +21,9 @@ jest.mock('@prisma/client', () => {
     shift: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
-      create: jest.fn()
+      create: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn()
     },
     user: {
       findUnique: jest.fn()
@@ -37,6 +39,10 @@ import { PrismaClient } from '@prisma/client'
 
 const prismaInstance = new (PrismaClient as any)()
 const mockFindMany = prismaInstance.shift.findMany as jest.Mock
+const mockFindUnique = prismaInstance.shift.findUnique as jest.Mock
+const mockUpdate = prismaInstance.shift.update as jest.Mock
+const mockDelete = prismaInstance.shift.delete as jest.Mock
+const mockShiftTypeFindUnique = prismaInstance.shiftType.findUnique as jest.Mock
 
 const mockShift = {
   id: 1,
@@ -48,7 +54,15 @@ const mockShift = {
     name: 'Manhã',
     startTime: '08:00',
     endTime: '16:00'
-  }
+  },
+  user: { id: 1, name: 'João Silva', employeeNumber: 'EMP001' }
+}
+
+const mockShiftType = {
+  id: 2,
+  name: 'Tarde',
+  startTime: '16:00',
+  endTime: '00:00'
 }
 
 beforeEach(() => {
@@ -125,5 +139,155 @@ describe('GET /shifts/me', () => {
 
       expect(res.status).toBe(200)
     }
+  })
+})
+
+describe('PATCH /shifts/:id', () => {
+  it('deve atualizar o tipo de turno com sucesso (ADMIN)', async () => {
+    mockFindUnique.mockResolvedValueOnce(mockShift)
+    mockShiftTypeFindUnique.mockResolvedValueOnce(mockShiftType)
+    mockUpdate.mockResolvedValueOnce({ ...mockShift, shiftTypeId: 2, shiftType: mockShiftType })
+
+    const res = await request(app)
+      .patch('/shifts/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ shiftTypeId: 2 })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('shiftTypeId', 2)
+  })
+
+  it('deve atualizar a data do turno com sucesso (MANAGER)', async () => {
+    mockFindUnique
+      .mockResolvedValueOnce(mockShift)
+      .mockResolvedValueOnce(null)
+    mockUpdate.mockResolvedValueOnce({ ...mockShift, date: '2026-04-30T00:00:00.000Z' })
+
+    const res = await request(app)
+      .patch('/shifts/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'MANAGER')
+      .send({ date: '2026-04-30' })
+
+    expect(res.status).toBe(200)
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 1 },
+        data: expect.objectContaining({ date: new Date('2026-04-30') })
+      })
+    )
+  })
+
+  it('deve retornar 400 quando nenhum campo é fornecido', async () => {
+    const res = await request(app)
+      .patch('/shifts/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({})
+
+    expect(res.status).toBe(400)
+    expect(res.body).toHaveProperty('message')
+  })
+
+  it('deve retornar 404 quando o turno não existe', async () => {
+    mockFindUnique.mockResolvedValueOnce(null)
+
+    const res = await request(app)
+      .patch('/shifts/99')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ shiftTypeId: 2 })
+
+    expect(res.status).toBe(404)
+    expect(res.body).toHaveProperty('message', 'Shift not found')
+  })
+
+  it('deve retornar 404 quando o tipo de turno não existe', async () => {
+    mockFindUnique.mockResolvedValueOnce(mockShift)
+    mockShiftTypeFindUnique.mockResolvedValueOnce(null)
+
+    const res = await request(app)
+      .patch('/shifts/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ shiftTypeId: 99 })
+
+    expect(res.status).toBe(404)
+    expect(res.body).toHaveProperty('message', 'Shift type not found')
+  })
+
+  it('deve retornar 409 quando o utilizador já tem turno na nova data', async () => {
+    const conflictShift = { ...mockShift, id: 2 }
+    mockFindUnique
+      .mockResolvedValueOnce(mockShift)
+      .mockResolvedValueOnce(conflictShift)
+
+    const res = await request(app)
+      .patch('/shifts/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ date: '2026-04-22' })
+
+    expect(res.status).toBe(409)
+    expect(res.body).toHaveProperty('message', 'User already has a shift on this date')
+  })
+
+  it('deve retornar 403 para EMPLOYEE', async () => {
+    const res = await request(app)
+      .patch('/shifts/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'EMPLOYEE')
+      .send({ shiftTypeId: 2 })
+
+    expect(res.status).toBe(403)
+  })
+})
+
+describe('DELETE /shifts/:id', () => {
+  it('deve remover o turno com sucesso (ADMIN)', async () => {
+    mockFindUnique.mockResolvedValueOnce(mockShift)
+    mockDelete.mockResolvedValueOnce(mockShift)
+
+    const res = await request(app)
+      .delete('/shifts/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+
+    expect(res.status).toBe(204)
+    expect(mockDelete).toHaveBeenCalledWith({ where: { id: 1 } })
+  })
+
+  it('deve remover o turno com sucesso (MANAGER)', async () => {
+    mockFindUnique.mockResolvedValueOnce(mockShift)
+    mockDelete.mockResolvedValueOnce(mockShift)
+
+    const res = await request(app)
+      .delete('/shifts/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'MANAGER')
+
+    expect(res.status).toBe(204)
+  })
+
+  it('deve retornar 404 quando o turno não existe', async () => {
+    mockFindUnique.mockResolvedValueOnce(null)
+
+    const res = await request(app)
+      .delete('/shifts/99')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+
+    expect(res.status).toBe(404)
+    expect(res.body).toHaveProperty('message', 'Shift not found')
+  })
+
+  it('deve retornar 403 para EMPLOYEE', async () => {
+    const res = await request(app)
+      .delete('/shifts/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'EMPLOYEE')
+
+    expect(res.status).toBe(403)
   })
 })
