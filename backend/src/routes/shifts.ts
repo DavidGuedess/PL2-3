@@ -244,9 +244,44 @@ router.get('/', async (req: Request, res: Response) => {
     })
   }
 
-  const { start, end } = week
-    ? getWeekRange(week as string)
-    : getMonthRange(month as string)
+  if (week && typeof week !== 'string') {
+    return res.status(400).json({ message: 'week must be a string in format YYYY-MM-DD' })
+  }
+
+  if (month && typeof month !== 'string') {
+    return res.status(400).json({ message: 'month must be a string in format YYYY-MM' })
+  }
+
+  let start: Date
+  let end: Date
+
+  if (week) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) {
+      return res.status(400).json({ message: 'Invalid week format. Use YYYY-MM-DD' })
+    }
+
+    const range = getWeekRange(week)
+
+    if (isNaN(range.start.getTime()) || isNaN(range.end.getTime())) {
+      return res.status(400).json({ message: 'Invalid week date' })
+    }
+
+    start = range.start
+    end = range.end
+  } else {
+    if (!/^\d{4}-\d{2}$/.test(month as string)) {
+      return res.status(400).json({ message: 'Invalid month format. Use YYYY-MM' })
+    }
+
+    const range = getMonthRange(month as string)
+
+    if (isNaN(range.start.getTime()) || isNaN(range.end.getTime())) {
+      return res.status(400).json({ message: 'Invalid month date' })
+    }
+
+    start = range.start
+    end = range.end
+  }
 
   const shifts = await prisma.shift.findMany({
     where: { date: { gte: start, lte: end } },

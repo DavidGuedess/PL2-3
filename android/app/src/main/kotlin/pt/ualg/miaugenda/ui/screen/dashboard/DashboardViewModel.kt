@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.time.LocalDate
-import java.time.temporal.IsoFields
+import java.time.format.DateTimeFormatter
 
 data class DashboardUiState(
     val nextShift: Shift? = null,
@@ -30,9 +30,8 @@ class DashboardViewModel : ViewModel() {
             _uiState.value = DashboardUiState(isLoading = true)
             try {
                 val today = LocalDate.now()
-                val week = "${today.year}-W${
-                    today.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR).toString().padStart(2, '0')
-                }"
+                val week = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+
                 val response = RetrofitClient.shiftApi.getShifts(week = week)
                 if (response.isSuccessful) {
                     val nextShift = response.body()

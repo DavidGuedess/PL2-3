@@ -12,6 +12,7 @@ object RetrofitClient {
     private var retrofitInstance: Retrofit? = null
     private var authApiInstance: AuthApi? = null
     private var shiftApiInstance: ShiftApi? = null
+    private var attendanceApiInstance: AttendanceApi? = null
     
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = if (BuildConfig.DEBUG) {
@@ -23,13 +24,14 @@ object RetrofitClient {
 
     private fun createOkHttpClient(): OkHttpClient {
         val builder = OkHttpClient.Builder()
-            .addInterceptor(loggingInterceptor)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
-        
+
         authInterceptor?.let { builder.addInterceptor(it) }
-        
+
+        builder.addInterceptor(loggingInterceptor)
+
         return builder.build()
     }
 
@@ -50,6 +52,7 @@ object RetrofitClient {
         retrofitInstance = null
         authApiInstance = null
         shiftApiInstance = null
+        attendanceApiInstance = null
     }
 
     val authApi: AuthApi
@@ -66,5 +69,13 @@ object RetrofitClient {
                 shiftApiInstance = getRetrofit().create(ShiftApi::class.java)
             }
             return shiftApiInstance!!
+        }
+
+    val attendanceApi: AttendanceApi
+        get() {
+            if (attendanceApiInstance == null) {
+                attendanceApiInstance = getRetrofit().create(AttendanceApi::class.java)
+            }
+            return attendanceApiInstance!!
         }
 }

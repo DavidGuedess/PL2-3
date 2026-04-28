@@ -8,10 +8,12 @@ import androidx.navigation.compose.composable
 import pt.ualg.miaugenda.MiauGendaApp
 import pt.ualg.miaugenda.ui.screen.dashboard.DashboardScreen
 import pt.ualg.miaugenda.ui.screen.login.LoginScreen
+import pt.ualg.miaugenda.ui.screen.checkin.CheckInScreen
 
 sealed class Screen(val route: String) {
     object Login : Screen("login")
     object Dashboard : Screen("dashboard")
+    object CheckIn : Screen("checkin")
 }
 
 @Composable
@@ -39,6 +41,17 @@ fun NavGraph(
                     navController.navigate(Screen.Login.route) {
                         popUpTo(0) { inclusive = true }
                     }
+                },
+                onCheckInClick = {
+                    navController.navigate(Screen.CheckIn.route)
+                }
+            )
+        }
+
+        composable(Screen.CheckIn.route) {
+            CheckInScreen(
+                onBack = {
+                    navController.popBackStack()
                 }
             )
         }
