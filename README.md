@@ -137,15 +137,6 @@ Alinhamento dos tipos TypeScript com o schema Prisma:
 - Passwords encriptadas com bcrypt
 - Seed usa `upsert` — pode ser re-executado sem criar duplicados
 
-Notes:
-- Data is currently stored in-memory (temporary, resets on server restart)
-- UUIDs are used for unique user identification
-
-novas instalações
-- npm install uuid@8
-
-- npm install --save-dev jest ts-jest @types/jest supertest @types/supertest
-- npm install --save-dev @types/jest
 Para correr o seed:
 ```bash
 docker-compose exec backend npm run db:seed
@@ -205,7 +196,10 @@ Novos ficheiros: `backend/src/routes/shiftTypes.ts`, `backend/src/routes/shifts.
 - Campo `role` adicionado ao payload do JWT (access token inclui agora `userId`, `email` e `role`)
 - Criado middleware `requireRole(...roles)` em `middleware/auth.ts` — retorna 403 se o papel do utilizador não estiver na lista permitida
 - Adicionado `authenticate` aos routers de `/shifts` e `/shift-types` (estavam sem autenticação)
-- RBAC aplicado a todos os endpoints existentes:
+- Documentação Swagger atualizada com `security: bearerAuth` e respostas `401`/`403` em todos os endpoints protegidos
+- Criado `tests/rbac.test.ts` com testes de autorização (403 para papéis incorretos, acesso confirmado para papéis corretos)
+
+**Tabela de controlo de acesso (atualizada):**
 
 | Endpoint | Papéis permitidos |
 |---|---|
@@ -215,15 +209,44 @@ Novos ficheiros: `backend/src/routes/shiftTypes.ts`, `backend/src/routes/shifts.
 | `POST /users` | ADMIN |
 | `PATCH /users/me` | todos |
 | `PATCH /users/:id/deactivate` | ADMIN |
+| `PATCH /users/:id/activate` | ADMIN |
 | `GET /shifts` | todos |
+| `GET /shifts/me` | todos |
 | `POST /shifts` | ADMIN, MANAGER |
+| `PATCH /shifts/:id` | ADMIN, MANAGER |
+| `DELETE /shifts/:id` | ADMIN, MANAGER |
 | `GET /shift-types` | todos |
 | `POST /shift-types` | ADMIN, MANAGER |
 | `PATCH /shift-types/:id` | ADMIN, MANAGER |
 | `DELETE /shift-types/:id` | ADMIN, MANAGER |
+| `POST /attendance` | todos |
+| `GET /attendance/me` | todos |
+| `GET /attendance` | ADMIN, MANAGER |
 
-- Documentação Swagger atualizada com `security: bearerAuth` e respostas `401`/`403` em todos os endpoints protegidos
-- Criado `tests/rbac.test.ts` com testes de autorização (403 para papéis incorretos, acesso confirmado para papéis corretos)
+---
+
+### SCRUM-110 — Consulta e edição de perfil do utilizador (Sprint 2)
+
+- `GET /users/me` — devolve o perfil do utilizador autenticado (sem `passwordHash`)
+- `PATCH /users/me` — atualiza campos do próprio perfil; aceita qualquer combinação de `name`, `contact` e `password` (mínimo 6 caracteres)
+- Retorna `400` se nenhum campo for fornecido ou se o valor for inválido
+- Retorna `401` se o token não identificar um utilizador existente
+
+---
+
+### SCRUM-111 — Modelo de registos de ponto (Sprint 2)
+
+Adicionado modelo `AttendanceRecord` ao schema Prisma:
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| id | Int | autoincrement, PK |
+| userId | Int | FK para User |
+| type | AttendanceType | IN ou OUT |
+| timestamp | DateTime | auto (now) |
+
+- Constraint de sequência IN/OUT validada ao nível da aplicação (não pode registar OUT sem IN anterior, nem dois IN seguidos)
+- Migration `20260407_attendance` gerada com a nova tabela
 
 ---
 
@@ -244,16 +267,47 @@ Novos ficheiros: `backend/src/routes/shiftTypes.ts`, `backend/src/routes/shifts.
 
 ---
 
-# SCRUM-114 "Ecrã Login"
-- Campo para número de funcionário
-- Campo para password (com toggle de visibilidade)
-- Validação de campos obrigatórios
-- Mensagens de erro
-- Loading state durante autenticação
-- Integração com API `/api/auth/login`
+### SCRUM-114 — Ecrã de Login Android (Sprint 3)
 
-# SCRUM-115 "Registo de ponto"
-- Implementado endpoint POST /attendance para registo de entradas/saídas.
-- Implementado endpoint GET /attendance/me para consulta do histórico do utilizador autenticado.
-- Adicionada validação da sequência IN/OUT para garantir consistência dos registos.
-- Integração com Prisma/PostgreSQL e validação através de testes manuais (Postman).
+- Campo para número de funcionário e password (com toggle de visibilidade)
+- Validação de campos obrigatórios e mensagens de erro
+- Loading state durante autenticação
+- Integração com `POST /api/auth/login`
+
+---
+
+### SCRUM-113 — Ecrã Dashboard Android (Sprint 3)
+
+- Ecrã principal após login com dados do utilizador autenticado (nome, papel, categoria)
+- Apresenta o próximo turno agendado para o utilizador
+- Dados obtidos via `GET /users/me` e `GET /shifts/me`
+
+---
+
+### SCRUM-115 — Registo de ponto (Sprint 3)
+
+**Endpoints:**
+- `POST /attendance` — registar entrada (IN) ou saída (OUT) do utilizador autenticado
+- `GET /attendance/me` — consultar o próprio histórico; suporta filtros `?from=YYYY-MM-DD` e `?to=YYYY-MM-DD`
+- `GET /attendance?userId=X` — monitorizar registos de um funcionário (ADMIN/MANAGER); suporta os mesmos filtros de data
+
+Validação da sequência IN/OUT garante consistência dos registos (não é possível registar dois IN seguidos nem um OUT sem IN anterior).
+
+---
+
+### SCRUM-138 — Edição e remoção de turnos (Sprint 3)
+
+- `PATCH /shifts/:id` — editar um turno existente; aceita `shiftTypeId` e/ou `date`; retorna `409` se o funcionário já tiver turno na nova data
+- `DELETE /shifts/:id` — remover um turno; retorna `204` em caso de sucesso
+
+Ambos os endpoints requerem papel ADMIN ou MANAGER. Retornam `404` se o turno não existir.
+
+---
+
+### SCRUM-139 — Reativação de utilizadores (Sprint 3)
+
+- `PATCH /users/:id/activate` — reativa um utilizador previamente desativado
+- Exclusivo para ADMIN
+- Retorna `404` se o utilizador não existir
+- Retorna `409` se o utilizador já estiver ativo
+- Retorna `200` com o perfil atualizado (sem `passwordHash`)
