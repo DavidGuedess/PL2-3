@@ -9,11 +9,12 @@ import pt.ualg.miaugenda.MiauGendaApp
 import pt.ualg.miaugenda.ui.screen.dashboard.DashboardScreen
 import pt.ualg.miaugenda.ui.screen.login.LoginScreen
 import pt.ualg.miaugenda.ui.screen.checkin.CheckInScreen
-
+import pt.ualg.miaugenda.ui.screen.profile.ProfileScreen
 sealed class Screen(val route: String) {
     object Login : Screen("login")
     object Dashboard : Screen("dashboard")
     object CheckIn : Screen("checkin")
+    object Profile : Screen("profile")
 }
 
 @Composable
@@ -44,12 +45,23 @@ fun NavGraph(
                 },
                 onCheckInClick = {
                     navController.navigate(Screen.CheckIn.route)
+                },
+                onProfileClick = {
+                    navController.navigate(Screen.Profile.route)
                 }
             )
         }
 
         composable(Screen.CheckIn.route) {
             CheckInScreen(
+                onBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable(Screen.Profile.route) {
+            ProfileScreen(
                 onBack = {
                     navController.popBackStack()
                 }

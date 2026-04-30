@@ -23,6 +23,7 @@ import pt.ualg.miaugenda.data.model.Shift
 fun DashboardScreen(
     onLogout: () -> Unit = {},
     onCheckInClick: () -> Unit = {},
+    onProfileClick: () -> Unit = {},
     viewModel: DashboardViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -99,6 +100,15 @@ fun DashboardScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     InfoRow(label = "Categoria", value = category)
                 }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = onProfileClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Ver / editar perfil")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
