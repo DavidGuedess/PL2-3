@@ -295,4 +295,131 @@ router.get('/', async (req: Request, res: Response) => {
   res.json(shifts)
 })
 
+/**
+ * @openapi
+ * /shifts/{id}:
+ *   patch:
+ *     summary: Editar um turno (Admin/Gestor)
+ *     tags: [Turnos]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               shiftTypeId:
+ *                 type: integer
+ *                 example: 2
+ *               date:
+ *                 type: string
+ *                 format: date
+ *                 example: "2026-04-30"
+ *     responses:
+ *       200:
+ *         description: Turno atualizado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Shift'
+ *       400:
+ *         description: Nenhum campo fornecido para atualizar
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
+ *       404:
+ *         description: Turno ou tipo de turno não encontrado
+ *       409:
+ *         description: Funcionário já tem turno nessa data
+ */
+router.patch('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id)
+  const { shiftTypeId, date } = req.body
+
+  if (!shiftTypeId && !date) {
+    return res.status(400).json({ message: 'shiftTypeId or date is required' })
+  }
+
+  const existing = await prisma.shift.findUnique({ where: { id } })
+  if (!existing) {
+    return res.status(404).json({ message: 'Shift not found' })
+  }
+
+  if (shiftTypeId) {
+    const shiftType = await prisma.shiftType.findUnique({ where: { id: parseInt(shiftTypeId) } })
+    if (!shiftType) {
+      return res.status(404).json({ message: 'Shift type not found' })
+    }
+  }
+
+  if (date) {
+    const shiftDate = new Date(date)
+    const conflict = await prisma.shift.findUnique({
+      where: { userId_date: { userId: existing.userId, date: shiftDate } }
+    })
+    if (conflict && conflict.id !== id) {
+      return res.status(409).json({ message: 'User already has a shift on this date' })
+    }
+  }
+
+  const updateData: { shiftTypeId?: number; date?: Date } = {}
+  if (shiftTypeId) updateData.shiftTypeId = parseInt(shiftTypeId)
+  if (date) updateData.date = new Date(date)
+
+  const shift = await prisma.shift.update({
+    where: { id },
+    data: updateData,
+    include: {
+      user: { select: { id: true, name: true, employeeNumber: true } },
+      shiftType: true
+    }
+  })
+
+  res.json(shift)
+})
+
+/**
+ * @openapi
+ * /shifts/{id}:
+ *   delete:
+ *     summary: Remover um turno (Admin/Gestor)
+ *     tags: [Turnos]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       204:
+ *         description: Turno removido
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
+ *       404:
+ *         description: Turno não encontrado
+ */
+router.delete('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id)
+
+  const existing = await prisma.shift.findUnique({ where: { id } })
+  if (!existing) {
+    return res.status(404).json({ message: 'Shift not found' })
+  }
+
+  await prisma.shift.delete({ where: { id } })
+  res.status(204).send()
+})
+
 export default router
