@@ -257,3 +257,11 @@ Novos ficheiros: `backend/src/routes/shiftTypes.ts`, `backend/src/routes/shifts.
 - Implementado endpoint GET /attendance/me para consulta do histórico do utilizador autenticado.
 - Adicionada validação da sequência IN/OUT para garantir consistência dos registos.
 - Integração com Prisma/PostgreSQL e validação através de testes manuais (Postman).
+
+# SCRUM-176 "Ecrã de perfil do utilizador"
+
+- Implementado ProfileScreen com campos editáveis (nome, contacto, password).
+- Adicionado GET /users/me para obter dados do utilizador.
+- Implementado PATCH /users/me para atualizar o perfil.
+- Ligação do ProfileScreen ao Dashboard através de navegação.
+- Atualização do TokenManager após alterações para manter a UI sincronizada.
