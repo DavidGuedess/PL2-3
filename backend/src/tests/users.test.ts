@@ -328,6 +328,49 @@ describe('Users API', () => {
     })
   })
 
+  describe('PATCH /users/:id/activate', () => {
+    it('should activate a user', async () => {
+      mockFindUnique.mockResolvedValue({ ...mockUser, active: false })
+      mockUpdate.mockResolvedValue({ ...mockUser, active: true })
+
+      const res = await request(app)
+        .patch('/users/1/activate')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(200)
+      expect(res.body.active).toBe(true)
+      expect(res.body.passwordHash).toBeUndefined()
+    })
+
+    it('should fail if user does not exist', async () => {
+      mockFindUnique.mockResolvedValue(null)
+
+      const res = await request(app)
+        .patch('/users/99999/activate')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(404)
+    })
+
+    it('should fail if user is already active', async () => {
+      mockFindUnique.mockResolvedValue(mockUser)
+
+      const res = await request(app)
+        .patch('/users/1/activate')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(409)
+    })
+
+    it('should return 403 if non-admin tries to activate a user', async () => {
+      const res = await request(app)
+        .patch('/users/1/activate')
+        .set('x-user-role', 'EMPLOYEE')
+
+      expect(res.status).toBe(403)
+    })
+  })
+
   describe('PATCH /users/me', () => {
     it('should update the authenticated user name', async () => {
       mockFindUnique.mockResolvedValue(mockUser)

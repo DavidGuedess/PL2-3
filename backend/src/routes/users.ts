@@ -355,4 +355,44 @@ router.patch('/:id/deactivate', requireRole('ADMIN'), async (req: Request, res: 
   return res.status(200).json(toPublic(updated))
 })
 
+/**
+ * @openapi
+ * /users/{id}/activate:
+ *   patch:
+ *     tags: [Users]
+ *     summary: Reativar um utilizador
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Utilizador reativado
+ *       403:
+ *         description: Sem permissão
+ *       404:
+ *         description: Utilizador não encontrado
+ *       409:
+ *         description: Utilizador já está ativo
+ */
+router.patch('/:id/activate', requireRole('ADMIN'), async (req: Request, res: Response) => {
+  const userId = Number(req.params.id)
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' })
+  }
+
+  if (user.active) {
+    return res.status(409).json({ message: 'User already active' })
+  }
+
+  const updated = await prisma.user.update({ where: { id: userId }, data: { active: true } })
+  return res.status(200).json(toPublic(updated))
+})
+
 export default router
