@@ -24,6 +24,7 @@ fun DashboardScreen(
     onLogout: () -> Unit = {},
     onCheckInClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
+    onAttendanceHistoryClick: () -> Unit = {},
     viewModel: DashboardViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -118,6 +119,15 @@ fun DashboardScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Registar entrada/saída")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = onAttendanceHistoryClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Consultar histórico de presenças")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
