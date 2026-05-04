@@ -20,6 +20,8 @@ import pt.ualg.miaugenda.data.model.AttendanceRecord
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Calendar
+import java.time.Instant
+import java.time.ZoneId
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,9 +148,6 @@ fun AttendanceHistoryScreen(
                     Text("Fechar")
                 }
             },
-            icon = {
-                Icon(Icons.Default.Close, contentDescription = null)
-            },
             title = {
                 Text("Detalhes do dia")
             },
@@ -256,10 +255,13 @@ private fun formatDate(date: String): String {
     }
 }
 
+
+
 private fun formatOnlyTime(timestamp: String): String {
     return try {
-        val cleanTimestamp = timestamp.replace("Z", "")
-        val dateTime = LocalDateTime.parse(cleanTimestamp.substring(0, 19))
+        val dateTime = Instant.parse(timestamp)
+            .atZone(ZoneId.systemDefault())
+
         dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))
     } catch (e: Exception) {
         timestamp

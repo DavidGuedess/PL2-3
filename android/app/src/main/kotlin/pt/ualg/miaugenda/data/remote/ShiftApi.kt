@@ -7,7 +7,7 @@ import retrofit2.http.Query
 
 interface ShiftApi {
     @GET("/shifts")
-    suspend fun getShifts(
+    suspend fun getMyShifts(
         @Query("week") week: String? = null
     ): Response<List<Shift>>
 }
