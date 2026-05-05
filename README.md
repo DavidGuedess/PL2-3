@@ -325,3 +325,13 @@ Ambos os endpoints requerem papel ADMIN ou MANAGER. Retornam `404` se o turno n�
 - Implementado PATCH /users/me para atualizar o perfil.
 - Ligação do ProfileScreen ao Dashboard através de navegação.
 - Atualização do TokenManager após alterações para manter a UI sincronizada.
+
+# SCRUM-177 "Ecrã de histórico de presenças"
+
+- Implementado AttendanceHistoryScreen com listagem de registos de presença (IN/OUT).
+- Integração com GET /attendance/me para obter histórico do utilizador.
+- Criação de AttendanceHistoryViewModel para gestão de estado e lógica de dados.
+- Implementados filtros por intervalo de datas (from/to) com DatePicker.
+- Agrupamento dos registos por dia, com cálculo do tempo total diário.
+- Adição de visualização detalhada por dia (modal com registos e horas).
+- Navegação a partir do Dashboard para acesso ao histórico.
