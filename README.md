@@ -311,3 +311,27 @@ Ambos os endpoints requerem papel ADMIN ou MANAGER. Retornam `404` se o turno n�
 - Retorna `404` se o utilizador não existir
 - Retorna `409` se o utilizador já estiver ativo
 - Retorna `200` com o perfil atualizado (sem `passwordHash`)
+
+# SCRUM-115 "Registo de ponto"
+- Implementado endpoint POST /attendance para registo de entradas/saídas.
+- Implementado endpoint GET /attendance/me para consulta do histórico do utilizador autenticado.
+- Adicionada validação da sequência IN/OUT para garantir consistência dos registos.
+- Integração com Prisma/PostgreSQL e validação através de testes manuais (Postman).
+
+# SCRUM-176 "Ecrã de perfil do utilizador"
+
+- Implementado ProfileScreen com campos editáveis (nome, contacto, password).
+- Adicionado GET /users/me para obter dados do utilizador.
+- Implementado PATCH /users/me para atualizar o perfil.
+- Ligação do ProfileScreen ao Dashboard através de navegação.
+- Atualização do TokenManager após alterações para manter a UI sincronizada.
+
+# SCRUM-177 "Ecrã de histórico de presenças"
+
+- Implementado AttendanceHistoryScreen com listagem de registos de presença (IN/OUT).
+- Integração com GET /attendance/me para obter histórico do utilizador.
+- Criação de AttendanceHistoryViewModel para gestão de estado e lógica de dados.
+- Implementados filtros por intervalo de datas (from/to) com DatePicker.
+- Agrupamento dos registos por dia, com cálculo do tempo total diário.
+- Adição de visualização detalhada por dia (modal com registos e horas).
+- Navegação a partir do Dashboard para acesso ao histórico.

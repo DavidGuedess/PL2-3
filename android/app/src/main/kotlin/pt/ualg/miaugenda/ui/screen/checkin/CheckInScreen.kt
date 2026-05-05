@@ -1,20 +1,32 @@
 package pt.ualg.miaugenda.ui.screen.checkin
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import pt.ualg.miaugenda.data.model.AttendanceRecord
 import pt.ualg.miaugenda.data.remote.RetrofitClient
-import java.time.LocalDate
-import java.time.LocalTime
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.time.Instant
+import java.time.ZoneId
+private val PurpleMain = Color(0xFF6F4BB2)
+private val PurpleSoft = Color(0xFFF3ECFA)
+private val BlueSoft = Color(0xFFEAF6FF)
+private val InfoBlue = Color(0xFFDDE8FF)
+private val SuccessGreen = Color(0xFF08A979)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -24,15 +36,10 @@ fun CheckInScreen(
     var isWorking by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var records by remember { mutableStateOf<List<AttendanceRecord>>(emptyList()) }
 
     val scope = rememberCoroutineScope()
     val attendanceApi = RetrofitClient.attendanceApi
-
-    val currentDate = LocalDate.now()
-    val currentTime = LocalTime.now()
-
-    val displayDate = currentDate.format(DateTimeFormatter.ofPattern("dd MMM yyyy"))
-    val displayTime = currentTime.format(DateTimeFormatter.ofPattern("HH:mm"))
 
     fun loadMyAttendanceHistory() {
         scope.launch {
@@ -43,7 +50,7 @@ fun CheckInScreen(
                 val response = attendanceApi.getMyHistory()
 
                 if (response.isSuccessful) {
-                    val records = response.body().orEmpty()
+                    records = response.body().orEmpty()
                     val lastRecord = records.firstOrNull()
                     isWorking = lastRecord?.type == "IN"
                 } else if (response.code() == 401) {
@@ -66,7 +73,12 @@ fun CheckInScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Check-In") },
+                title = {
+                    Text(
+                        text = "MIAUGENDA",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -82,63 +94,48 @@ fun CheckInScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(BlueSoft, PurpleSoft)
+                    )
+                )
                 .padding(paddingValues)
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState())
         ) {
-            Text(text = displayDate, fontSize = 18.sp)
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(text = displayTime, fontSize = 32.sp)
-
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             Text(
-                text = if (isWorking) "Em serviço" else "Fora de serviço",
-                color = if (isWorking) Color(0xFF2E7D32) else Color.Red,
-                fontSize = 20.sp
+                text = "REGISTO DE PRESENÇA",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            message?.let {
-                Text(
-                    text = it,
-                    color = Color.Gray,
-                    fontSize = 14.sp
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            Button(
-                onClick = {
+            CurrentShiftCard(
+                isWorking = isWorking,
+                isLoading = isLoading,
+                onRegisterIn = {
                     scope.launch {
                         isLoading = true
                         message = null
 
                         try {
-                            val typeToSend = if (isWorking) "OUT" else "IN"
-
                             val response = attendanceApi.register(
-                                mapOf("type" to typeToSend)
+                                mapOf("type" to "IN")
                             )
 
                             if (response.isSuccessful) {
-                                isWorking = !isWorking
-                                message = if (typeToSend == "IN") {
-                                    "Entrada registada com sucesso"
-                                } else {
-                                    "Saída registada com sucesso"
-                                }
+                                message = "Entrada registada com sucesso"
+                                loadMyAttendanceHistory()
                             } else if (response.code() == 400) {
                                 message = "Sequência inválida de registo"
                             } else if (response.code() == 401) {
                                 message = "Utilizador não autorizado"
                             } else {
-                                message = "Erro ao registar ponto"
+                                message = "Erro ao registar entrada"
                             }
                         } catch (e: Exception) {
                             message = "Erro: ${e.message}"
@@ -147,17 +144,246 @@ fun CheckInScreen(
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isLoading
-            ) {
-                Text(
-                    text = when {
-                        isLoading -> "A processar..."
-                        isWorking -> "Sair"
-                        else -> "Entrar"
+                onRegisterOut = {
+                    scope.launch {
+                        isLoading = true
+                        message = null
+
+                        try {
+                            val response = attendanceApi.register(
+                                mapOf("type" to "OUT")
+                            )
+
+                            if (response.isSuccessful) {
+                                message = "Saída registada com sucesso"
+                                loadMyAttendanceHistory()
+                            } else if (response.code() == 400) {
+                                message = "Sequência inválida de registo"
+                            } else if (response.code() == 401) {
+                                message = "Utilizador não autorizado"
+                            } else {
+                                message = "Erro ao registar saída"
+                            }
+                        } catch (e: Exception) {
+                            message = "Erro: ${e.message}"
+                        } finally {
+                            isLoading = false
+                        }
                     }
+                }
+            )
+
+            message?.let {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium
                 )
             }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = "HISTÓRICO DE REGISTOS",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            if (records.isEmpty()) {
+                EmptyHistoryCard()
+            } else {
+                records.take(5).forEach { record ->
+                    HistoryRow(record = record)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun CurrentShiftCard(
+    isWorking: Boolean,
+    isLoading: Boolean,
+    onRegisterIn: () -> Unit,
+    onRegisterOut: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White
+        ),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "Turno Atual:",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = InfoBlue
+                ),
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp)
+                ) {
+                    InfoText("Data", "Quinta-feira, 20 Novembro 2025")
+                    InfoText("Horário", "14:00 - 18:00")
+                    InfoText("Local", "Receção")
+                    InfoText("Função", "Atendimento ao cliente")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = onRegisterIn,
+                    modifier = Modifier.weight(1f),
+                    enabled = !isWorking && !isLoading,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SuccessGreen,
+                        contentColor = Color.White,
+                        disabledContainerColor = Color.LightGray,
+                        disabledContentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = if (isLoading) "A processar..." else "Registar Entrada",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Button(
+                    onClick = onRegisterOut,
+                    modifier = Modifier.weight(1f),
+                    enabled = isWorking && !isLoading,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SuccessGreen,
+                        contentColor = Color.White,
+                        disabledContainerColor = Color.LightGray,
+                        disabledContentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = if (isLoading) "A processar..." else "Registar Saída",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoText(label: String, value: String) {
+    Row {
+        Text(
+            text = "$label: ",
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+}
+
+@Composable
+private fun HistoryRow(record: AttendanceRecord) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White.copy(alpha = 0.85f)
+        ),
+        shape = RoundedCornerShape(6.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = formatRecordDate(record.timestamp),
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Registo de presença",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Text(
+                text = "${formatType(record.type)}: ${formatOnlyTime(record.timestamp)}",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyHistoryCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White.copy(alpha = 0.85f)
+        )
+    ) {
+        Text(
+            text = "Ainda não existem registos de presença.",
+            modifier = Modifier.padding(14.dp)
+        )
+    }
+}
+
+private fun formatType(type: String): String {
+    return if (type == "IN") {
+        "Entrada"
+    } else {
+        "Saída"
+    }
+}
+
+private fun formatOnlyTime(timestamp: String): String {
+    return try {
+        val dateTime = Instant.parse(timestamp)
+            .atZone(ZoneId.systemDefault())
+
+        dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))
+    } catch (e: Exception) {
+        timestamp
+    }
+}
+
+private fun formatRecordDate(timestamp: String): String {
+    return try {
+        val dateTime = Instant.parse(timestamp)
+            .atZone(ZoneId.systemDefault())
+
+        dateTime.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+    } catch (e: Exception) {
+        timestamp
     }
 }

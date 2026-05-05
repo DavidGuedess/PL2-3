@@ -11,6 +11,7 @@ data class User(
     val employeeNumber: String,
     val name: String,
     val email: String,
+    val contact: String?,
     val role: String,
     val category: String
 )
