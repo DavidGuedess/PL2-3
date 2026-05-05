@@ -9,6 +9,8 @@ import pt.ualg.miaugenda.data.model.AttendanceRecord
 import pt.ualg.miaugenda.data.remote.RetrofitClient
 import java.time.Duration
 import java.time.LocalDateTime
+import java.time.Instant
+import java.time.ZoneId
 
 class AttendanceHistoryViewModel : ViewModel() {
 
@@ -138,7 +140,8 @@ class AttendanceHistoryViewModel : ViewModel() {
     }
 
     private fun parseTimestamp(timestamp: String): LocalDateTime {
-        val cleanTimestamp = timestamp.replace("Z", "")
-        return LocalDateTime.parse(cleanTimestamp.substring(0, 19))
+        return Instant.parse(timestamp)
+            .atZone(ZoneId.systemDefault())
+            .toLocalDateTime()
     }
 }

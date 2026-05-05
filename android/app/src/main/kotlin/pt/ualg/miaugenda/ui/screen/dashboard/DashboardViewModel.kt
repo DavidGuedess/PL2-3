@@ -2,16 +2,15 @@ package pt.ualg.miaugenda.ui.screen.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import pt.ualg.miaugenda.data.model.Shift
-import pt.ualg.miaugenda.data.remote.RetrofitClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import pt.ualg.miaugenda.data.model.Shift
+import pt.ualg.miaugenda.data.remote.RetrofitClient
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
 data class DashboardUiState(
-    val nextShift: Shift? = null,
+    val shifts: List<Shift> = emptyList(),
     val isLoading: Boolean = true,
     val error: Boolean = false
 )
@@ -21,28 +20,34 @@ class DashboardViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState
 
-    init {
-        loadNextShift()
-    }
-
-    fun loadNextShift() {
+    fun loadWeekShifts(weekStart: LocalDate) {
         viewModelScope.launch {
-            _uiState.value = DashboardUiState(isLoading = true)
-            try {
-                val today = LocalDate.now()
-                val week = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+            _uiState.value = _uiState.value.copy(
+                isLoading = true,
+                error = false
+            )
 
-                val response = RetrofitClient.shiftApi.getShifts(week = week)
+            try {
+                val response = RetrofitClient.shiftApi.getMyShifts(
+                    week = weekStart.toString()
+                )
+
                 if (response.isSuccessful) {
-                    val nextShift = response.body()
-                        ?.filter { LocalDate.parse(it.date.substring(0, 10)) >= today }
-                        ?.minByOrNull { it.date }
-                    _uiState.value = DashboardUiState(nextShift = nextShift, isLoading = false)
+                    _uiState.value = DashboardUiState(
+                        shifts = response.body().orEmpty(),
+                        isLoading = false
+                    )
                 } else {
-                    _uiState.value = DashboardUiState(isLoading = false, error = true)
+                    _uiState.value = DashboardUiState(
+                        isLoading = false,
+                        error = true
+                    )
                 }
             } catch (e: Exception) {
-                _uiState.value = DashboardUiState(isLoading = false, error = true)
+                _uiState.value = DashboardUiState(
+                    isLoading = false,
+                    error = true
+                )
             }
         }
     }
