@@ -9,6 +9,9 @@ import retrofit2.http.PATCH
 
 interface UserApi {
 
+    @GET("users")
+    suspend fun getUsers(): Response<List<User>>
+
     @GET("users/me")
     suspend fun getMe(): Response<User>
 
