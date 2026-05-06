@@ -9,6 +9,7 @@ jest.mock('@prisma/client', () => {
       findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
     }
   }
   return { PrismaClient: jest.fn(() => mockInstance) }
@@ -47,6 +48,7 @@ let mockFindMany: jest.Mock
 let mockFindUnique: jest.Mock
 let mockCreate: jest.Mock
 let mockUpdate: jest.Mock
+let mockCount: jest.Mock
 
 beforeAll(() => {
   const prismaInstance = (PrismaClient as jest.Mock).mock.results[0]?.value
@@ -54,6 +56,7 @@ beforeAll(() => {
   mockFindUnique = prismaInstance?.user?.findUnique
   mockCreate = prismaInstance?.user?.create
   mockUpdate = prismaInstance?.user?.update
+  mockCount = prismaInstance?.user?.count
 })
 
 beforeEach(() => {
@@ -478,6 +481,139 @@ describe('Users API', () => {
         .send({ name: 'No Auth' })
 
       expect(res.status).toBe(401)
+    })
+  })
+
+  describe('GET /users - paginação e filtragem', () => {
+    it('should return paginated users when page and limit are provided', async () => {
+      mockCount.mockResolvedValue(1)
+      mockFindMany.mockResolvedValue([mockUser])
+
+      const res = await request(app)
+        .get('/users?page=1&limit=10')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(200)
+      expect(Array.isArray(res.body.data)).toBe(true)
+      expect(res.body.total).toBe(1)
+      expect(res.body.page).toBe(1)
+      expect(res.body.limit).toBe(10)
+      expect(res.body.totalPages).toBe(1)
+      expect(res.body.data[0].passwordHash).toBeUndefined()
+    })
+
+    it('should calculate totalPages correctly', async () => {
+      mockCount.mockResolvedValue(25)
+      mockFindMany.mockResolvedValue([mockUser])
+
+      const res = await request(app)
+        .get('/users?page=2&limit=10')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(200)
+      expect(res.body.totalPages).toBe(3)
+      expect(res.body.page).toBe(2)
+    })
+
+    it('should filter by name without pagination', async () => {
+      mockFindMany.mockResolvedValue([mockUser])
+
+      const res = await request(app)
+        .get('/users?name=Test')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(200)
+      expect(Array.isArray(res.body)).toBe(true)
+    })
+
+    it('should filter by role without pagination', async () => {
+      mockFindMany.mockResolvedValue([mockUser])
+
+      const res = await request(app)
+        .get('/users?role=EMPLOYEE')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(200)
+      expect(Array.isArray(res.body)).toBe(true)
+    })
+
+    it('should filter by category without pagination', async () => {
+      mockFindMany.mockResolvedValue([mockUser])
+
+      const res = await request(app)
+        .get('/users?category=VETERINARIAN')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(200)
+      expect(Array.isArray(res.body)).toBe(true)
+    })
+
+    it('should apply pagination and filters combined', async () => {
+      mockCount.mockResolvedValue(1)
+      mockFindMany.mockResolvedValue([mockUser])
+
+      const res = await request(app)
+        .get('/users?page=1&limit=5&role=EMPLOYEE&category=VETERINARIAN&name=Test')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(200)
+      expect(Array.isArray(res.body.data)).toBe(true)
+      expect(res.body.page).toBe(1)
+      expect(res.body.limit).toBe(5)
+    })
+
+    it('should return 400 for invalid role filter', async () => {
+      const res = await request(app)
+        .get('/users?role=INVALID_ROLE')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(400)
+      expect(res.body.message).toBe('Invalid role filter')
+    })
+
+    it('should return 400 for invalid category filter', async () => {
+      const res = await request(app)
+        .get('/users?category=INVALID_CATEGORY')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(400)
+      expect(res.body.message).toBe('Invalid category filter')
+    })
+
+    it('should return 400 for page=0', async () => {
+      const res = await request(app)
+        .get('/users?page=0&limit=10')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(400)
+      expect(res.body.message).toBe('page must be a positive integer')
+    })
+
+    it('should return 400 for limit=0', async () => {
+      const res = await request(app)
+        .get('/users?page=1&limit=0')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(400)
+      expect(res.body.message).toBe('limit must be a positive integer')
+    })
+
+    it('should return 400 for non-numeric page', async () => {
+      const res = await request(app)
+        .get('/users?page=abc&limit=10')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(400)
+      expect(res.body.message).toBe('page must be a positive integer')
+    })
+
+    it('should return 400 for negative limit', async () => {
+      const res = await request(app)
+        .get('/users?page=1&limit=-5')
+        .set('x-user-role', 'ADMIN')
+
+      expect(res.status).toBe(400)
+      expect(res.body.message).toBe('limit must be a positive integer')
     })
   })
 })

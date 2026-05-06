@@ -86,16 +86,90 @@ async function getAuthenticatedUser(req: Request): Promise<User | null> {
  *     summary: Listar todos os utilizadores (Admin/Gestor)
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Número da página
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Número de resultados por página
+ *       - in: query
+ *         name: name
+ *         schema:
+ *           type: string
+ *         description: Filtrar por nome (parcial, insensível a maiúsculas)
+ *       - in: query
+ *         name: role
+ *         schema:
+ *           type: string
+ *           enum: [ADMIN, MANAGER, EMPLOYEE]
+ *         description: Filtrar por papel
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *           enum: [VETERINARIAN, NURSE, OPERATIONAL, ADMINISTRATIVE]
+ *         description: Filtrar por categoria
  *     responses:
  *       200:
- *         description: Lista de utilizadores
+ *         description: Lista de utilizadores (com paginação se page e limit fornecidos)
+ *       400:
+ *         description: Parâmetros inválidos
  *       401:
  *         description: Não autenticado
  *       403:
  *         description: Sem permissão (requer ADMIN ou MANAGER)
  */
-router.get('/', requireRole('ADMIN', 'MANAGER'), async (_req: Request, res: Response) => {
-  const allUsers = await prisma.user.findMany({ orderBy: { name: 'asc' } })
+router.get('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+  const { page, limit, name, role, category } = req.query
+
+  const validRoles: UserRole[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
+  const validCategories: UserCategory[] = ['VETERINARIAN', 'NURSE', 'OPERATIONAL', 'ADMINISTRATIVE']
+
+  if (role !== undefined && !validRoles.includes(role as UserRole)) {
+    return res.status(400).json({ message: 'Invalid role filter' })
+  }
+  if (category !== undefined && !validCategories.includes(category as UserCategory)) {
+    return res.status(400).json({ message: 'Invalid category filter' })
+  }
+
+  const pageNum = page !== undefined ? parseInt(page as string, 10) : undefined
+  const limitNum = limit !== undefined ? parseInt(limit as string, 10) : undefined
+
+  if (pageNum !== undefined && (isNaN(pageNum) || pageNum < 1)) {
+    return res.status(400).json({ message: 'page must be a positive integer' })
+  }
+  if (limitNum !== undefined && (isNaN(limitNum) || limitNum < 1)) {
+    return res.status(400).json({ message: 'limit must be a positive integer' })
+  }
+
+  const where: any = {}
+  if (name) where.name = { contains: name as string, mode: 'insensitive' }
+  if (role) where.role = role as string
+  if (category) where.category = category as string
+
+  if (pageNum !== undefined && limitNum !== undefined) {
+    const skip = (pageNum - 1) * limitNum
+    const [total, users] = await Promise.all([
+      prisma.user.count({ where }),
+      prisma.user.findMany({ where, orderBy: { name: 'asc' }, skip, take: limitNum })
+    ])
+    return res.status(200).json({
+      data: users.map(toPublic),
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum)
+    })
+  }
+
+  const allUsers = await prisma.user.findMany({ where, orderBy: { name: 'asc' } })
   return res.status(200).json(allUsers.map(toPublic))
 })
 

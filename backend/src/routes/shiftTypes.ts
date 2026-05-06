@@ -53,21 +53,63 @@ router.use(authenticate)
  *     tags: [Turnos]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Número da página
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Número de resultados por página
  *     responses:
  *       200:
- *         description: Lista de tipos de turno
+ *         description: Lista de tipos de turno (com paginação se page e limit fornecidos)
  *         content:
  *           application/json:
  *             schema:
  *               type: array
  *               items:
  *                 $ref: '#/components/schemas/ShiftType'
+ *       400:
+ *         description: Parâmetros inválidos
  *       401:
  *         description: Não autenticado
  */
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
+  const { page, limit } = req.query
+
+  const pageNum = page !== undefined ? parseInt(page as string, 10) : undefined
+  const limitNum = limit !== undefined ? parseInt(limit as string, 10) : undefined
+
+  if (pageNum !== undefined && (isNaN(pageNum) || pageNum < 1)) {
+    return res.status(400).json({ message: 'page must be a positive integer' })
+  }
+  if (limitNum !== undefined && (isNaN(limitNum) || limitNum < 1)) {
+    return res.status(400).json({ message: 'limit must be a positive integer' })
+  }
+
+  if (pageNum !== undefined && limitNum !== undefined) {
+    const skip = (pageNum - 1) * limitNum
+    const [total, shiftTypes] = await Promise.all([
+      prisma.shiftType.count(),
+      prisma.shiftType.findMany({ orderBy: { name: 'asc' }, skip, take: limitNum })
+    ])
+    return res.status(200).json({
+      data: shiftTypes,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum)
+    })
+  }
+
   const shiftTypes = await prisma.shiftType.findMany({ orderBy: { name: 'asc' } })
-  res.json(shiftTypes)
+  return res.status(200).json(shiftTypes)
 })
 
 /**
