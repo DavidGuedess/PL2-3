@@ -7,6 +7,29 @@ const prisma = new PrismaClient()
 
 router.use(authenticate)
 
+function toMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number)
+  return h * 60 + m
+}
+
+function shiftsOverlap(
+  date1: Date, startTime1: string, endTime1: string,
+  date2: Date, startTime2: string, endTime2: string
+): boolean {
+  const MINS_PER_DAY = 24 * 60
+  const base1 = date1.getTime() / 60000
+  const base2 = date2.getTime() / 60000
+  const s1 = toMinutes(startTime1)
+  const e1 = toMinutes(endTime1)
+  const s2 = toMinutes(startTime2)
+  const e2 = toMinutes(endTime2)
+  const abs1Start = base1 + s1
+  const abs1End   = base1 + (e1 > s1 ? e1 : e1 + MINS_PER_DAY)
+  const abs2Start = base2 + s2
+  const abs2End   = base2 + (e2 > s2 ? e2 : e2 + MINS_PER_DAY)
+  return abs1Start < abs2End && abs2Start < abs1End
+}
+
 function getWeekRange(dateStr: string): { start: Date; end: Date } {
   const base = new Date(dateStr)
   const day = base.getUTCDay()
@@ -100,7 +123,7 @@ function getMonthRange(monthStr: string): { start: Date; end: Date } {
  *       404:
  *         description: Utilizador ou tipo de turno não encontrado
  *       409:
- *         description: Funcionário já tem turno nessa data
+ *         description: Conflito de horário — o turno sobrepõe-se a um turno existente
  */
 router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
   const { userId, shiftTypeId, date } = req.body
@@ -121,11 +144,25 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Resp
 
   const shiftDate = new Date(date)
 
-  const existing = await prisma.shift.findUnique({
-    where: { userId_date: { userId: parseInt(userId), date: shiftDate } }
+  const dayBefore = new Date(shiftDate)
+  dayBefore.setUTCDate(shiftDate.getUTCDate() - 1)
+  const dayAfter = new Date(shiftDate)
+  dayAfter.setUTCDate(shiftDate.getUTCDate() + 1)
+
+  const nearbyShifts = await prisma.shift.findMany({
+    where: { userId: parseInt(userId), date: { gte: dayBefore, lte: dayAfter } },
+    include: { shiftType: true }
   })
-  if (existing) {
-    return res.status(409).json({ message: 'User already has a shift on this date' })
+
+  const conflict = nearbyShifts.find(s =>
+    shiftsOverlap(shiftDate, shiftType.startTime, shiftType.endTime, s.date, s.shiftType.startTime, s.shiftType.endTime)
+  )
+
+  if (conflict) {
+    const conflictDate = new Date(conflict.date).toISOString().slice(0, 10)
+    return res.status(409).json({
+      message: `Shift conflict: '${shiftType.name}' (${shiftType.startTime}–${shiftType.endTime}) overlaps with existing shift '${conflict.shiftType.name}' (${conflict.shiftType.startTime}–${conflict.shiftType.endTime}) on ${conflictDate}`
+    })
   }
 
   const shift = await prisma.shift.create({

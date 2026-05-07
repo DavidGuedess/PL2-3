@@ -5,6 +5,7 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Query
 
 interface AttendanceApi {
     @POST("/attendance")
@@ -14,4 +15,11 @@ interface AttendanceApi {
 
     @GET("/attendance/me")
     suspend fun getMyHistory(): Response<List<AttendanceRecord>>
+
+    @GET("/attendance")
+    suspend fun getUserAttendance(
+        @Query("userId") userId: Int,
+        @Query("from") from: String? = null,
+        @Query("to") to: String? = null
+    ): Response<List<AttendanceRecord>>
 }

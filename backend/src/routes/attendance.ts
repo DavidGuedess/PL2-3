@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticate, requireRole } from '../middleware/auth'
-import { createAttendance, getMyAttendance } from '../controllers/attendanceController'
+import { createAttendance, getMyAttendance, getAttendanceReport } from '../controllers/attendanceController'
 
 const router = Router()
 const prisma = new PrismaClient()
@@ -106,6 +106,65 @@ router.post('/', createAttendance)
  *         description: Não autenticado
  */
 router.get('/me', getMyAttendance)
+
+/**
+ * @openapi
+ * /attendance/report:
+ *   get:
+ *     summary: Relatório de presenças e ausências por utilizador (Admin/Gestor)
+ *     tags: [Registos de Ponto]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Data de início (ex. 2026-04-01)
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Data de fim (ex. 2026-04-30)
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: integer
+ *         description: Filtrar por utilizador específico (opcional)
+ *     responses:
+ *       200:
+ *         description: Relatório de presenças agrupado por utilizador
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   userId:
+ *                     type: integer
+ *                   name:
+ *                     type: string
+ *                   employeeNumber:
+ *                     type: string
+ *                   totalScheduledDays:
+ *                     type: integer
+ *                   daysPresent:
+ *                     type: integer
+ *                   daysAbsent:
+ *                     type: integer
+ *       400:
+ *         description: userId inválido
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
+ *       404:
+ *         description: Utilizador não encontrado
+ */
+router.get('/report', requireRole('ADMIN', 'MANAGER'), getAttendanceReport)
 
 /**
  * @openapi

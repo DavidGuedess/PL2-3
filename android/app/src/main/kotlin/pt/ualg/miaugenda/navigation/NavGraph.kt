@@ -11,12 +11,15 @@ import pt.ualg.miaugenda.ui.screen.login.LoginScreen
 import pt.ualg.miaugenda.ui.screen.checkin.CheckInScreen
 import pt.ualg.miaugenda.ui.screen.profile.ProfileScreen
 import pt.ualg.miaugenda.ui.screen.attendancehistory.AttendanceHistoryScreen
+import pt.ualg.miaugenda.ui.screen.attendancemonitor.AttendanceMonitorScreen
+
 sealed class Screen(val route: String) {
     object Login : Screen("login")
     object Dashboard : Screen("dashboard")
     object CheckIn : Screen("checkin")
     object Profile : Screen("profile")
     object AttendanceHistory : Screen("attendance_history")
+    object AttendanceMonitor : Screen("attendance_monitor")
 }
 
 @Composable
@@ -37,7 +40,7 @@ fun NavGraph(
                 }
             )
         }
-        
+
         composable(Screen.Dashboard.route) {
             DashboardScreen(
                 onLogout = {
@@ -53,6 +56,9 @@ fun NavGraph(
                 },
                 onAttendanceHistoryClick = {
                     navController.navigate(Screen.AttendanceHistory.route)
+                },
+                onAttendanceMonitorClick = {
+                    navController.navigate(Screen.AttendanceMonitor.route)
                 }
             )
         }
@@ -75,6 +81,14 @@ fun NavGraph(
 
         composable(Screen.AttendanceHistory.route) {
             AttendanceHistoryScreen(
+                onBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable(Screen.AttendanceMonitor.route) {
+            AttendanceMonitorScreen(
                 onBack = {
                     navController.popBackStack()
                 }

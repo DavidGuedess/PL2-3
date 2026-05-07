@@ -40,9 +40,11 @@ import { PrismaClient } from '@prisma/client'
 const prismaInstance = new (PrismaClient as any)()
 const mockFindMany = prismaInstance.shift.findMany as jest.Mock
 const mockFindUnique = prismaInstance.shift.findUnique as jest.Mock
+const mockCreate = prismaInstance.shift.create as jest.Mock
 const mockUpdate = prismaInstance.shift.update as jest.Mock
 const mockDelete = prismaInstance.shift.delete as jest.Mock
 const mockShiftTypeFindUnique = prismaInstance.shiftType.findUnique as jest.Mock
+const mockUserFindUnique = prismaInstance.user.findUnique as jest.Mock
 
 const mockShift = {
   id: 1,
@@ -68,6 +70,141 @@ const mockShiftType = {
 beforeEach(() => {
   jest.clearAllMocks()
   mockFindMany.mockResolvedValue([mockShift])
+})
+
+const mockUser = { id: 1, name: 'João Silva', employeeNumber: 'EMP001' }
+
+const mockMorningType = { id: 1, name: 'Manhã', startTime: '08:00', endTime: '16:00' }
+const mockAfternoonType = { id: 2, name: 'Tarde', startTime: '12:00', endTime: '20:00' }
+const mockNightType = { id: 3, name: 'Noite', startTime: '22:00', endTime: '06:00' }
+
+describe('POST /shifts', () => {
+  it('deve criar um turno com sucesso quando não há conflito', async () => {
+    mockUserFindUnique.mockResolvedValueOnce(mockUser)
+    mockShiftTypeFindUnique.mockResolvedValueOnce(mockMorningType)
+    mockFindMany.mockResolvedValueOnce([])
+    mockCreate.mockResolvedValueOnce({ ...mockShift, id: 2, date: new Date('2026-04-25') })
+
+    const res = await request(app)
+      .post('/shifts')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ userId: 1, shiftTypeId: 1, date: '2026-04-25' })
+
+    expect(res.status).toBe(201)
+  })
+
+  it('deve retornar 409 quando há sobreposição de horário no mesmo dia', async () => {
+    mockUserFindUnique.mockResolvedValueOnce(mockUser)
+    mockShiftTypeFindUnique.mockResolvedValueOnce(mockAfternoonType)
+    mockFindMany.mockResolvedValueOnce([{
+      ...mockShift,
+      date: new Date('2026-04-21T00:00:00.000Z'),
+      shiftType: mockMorningType
+    }])
+
+    const res = await request(app)
+      .post('/shifts')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ userId: 1, shiftTypeId: 2, date: '2026-04-21' })
+
+    expect(res.status).toBe(409)
+    expect(res.body.message).toContain('conflict')
+    expect(res.body.message).toContain('Tarde')
+    expect(res.body.message).toContain('Manhã')
+  })
+
+  it('deve retornar 409 quando turno noturno sobrepõe turno do dia seguinte', async () => {
+    // Noite no dia 21 (22:00–06:00) e novo turno no dia 22 (04:00–12:00) — sobreposição
+    const earlyMorningType = { id: 4, name: 'Madrugada', startTime: '04:00', endTime: '12:00' }
+    mockUserFindUnique.mockResolvedValueOnce(mockUser)
+    mockShiftTypeFindUnique.mockResolvedValueOnce(earlyMorningType)
+    mockFindMany.mockResolvedValueOnce([{
+      id: 1, userId: 1, shiftTypeId: 3,
+      date: new Date('2026-04-21T00:00:00.000Z'),
+      shiftType: mockNightType
+    }])
+
+    const res = await request(app)
+      .post('/shifts')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ userId: 1, shiftTypeId: 4, date: '2026-04-22' })
+
+    expect(res.status).toBe(409)
+    expect(res.body.message).toContain('Noite')
+    expect(res.body.message).toContain('Madrugada')
+  })
+
+  it('não deve detetar conflito quando turnos são adjacentes mas não sobrepostos', async () => {
+    // Noite no dia 21 (22:00–06:00) e novo turno no dia 22 (06:00–14:00) — sem sobreposição
+    const morningType2 = { id: 5, name: 'Manhã Cedo', startTime: '06:00', endTime: '14:00' }
+    mockUserFindUnique.mockResolvedValueOnce(mockUser)
+    mockShiftTypeFindUnique.mockResolvedValueOnce(morningType2)
+    mockFindMany.mockResolvedValueOnce([{
+      id: 1, userId: 1, shiftTypeId: 3,
+      date: new Date('2026-04-21T00:00:00.000Z'),
+      shiftType: mockNightType
+    }])
+    mockCreate.mockResolvedValueOnce({ ...mockShift, id: 3, date: new Date('2026-04-22') })
+
+    const res = await request(app)
+      .post('/shifts')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ userId: 1, shiftTypeId: 5, date: '2026-04-22' })
+
+    expect(res.status).toBe(201)
+  })
+
+  it('deve retornar 400 quando faltam campos obrigatórios', async () => {
+    const res = await request(app)
+      .post('/shifts')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ userId: 1 })
+
+    expect(res.status).toBe(400)
+    expect(res.body).toHaveProperty('message')
+  })
+
+  it('deve retornar 404 quando o utilizador não existe', async () => {
+    mockUserFindUnique.mockResolvedValueOnce(null)
+
+    const res = await request(app)
+      .post('/shifts')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ userId: 99, shiftTypeId: 1, date: '2026-04-25' })
+
+    expect(res.status).toBe(404)
+    expect(res.body.message).toBe('User not found')
+  })
+
+  it('deve retornar 404 quando o tipo de turno não existe', async () => {
+    mockUserFindUnique.mockResolvedValueOnce(mockUser)
+    mockShiftTypeFindUnique.mockResolvedValueOnce(null)
+
+    const res = await request(app)
+      .post('/shifts')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ userId: 1, shiftTypeId: 99, date: '2026-04-25' })
+
+    expect(res.status).toBe(404)
+    expect(res.body.message).toBe('Shift type not found')
+  })
+
+  it('deve retornar 403 para EMPLOYEE', async () => {
+    const res = await request(app)
+      .post('/shifts')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'EMPLOYEE')
+      .send({ userId: 1, shiftTypeId: 1, date: '2026-04-25' })
+
+    expect(res.status).toBe(403)
+  })
 })
 
 describe('GET /shifts/me', () => {

@@ -49,6 +49,7 @@ fun DashboardScreen(
     onCheckInClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
     onAttendanceHistoryClick: () -> Unit = {},
+    onAttendanceMonitorClick: () -> Unit = {},
     viewModel: DashboardViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -102,8 +103,10 @@ fun DashboardScreen(
             Spacer(modifier = Modifier.height(14.dp))
 
             DashboardMenu(
+                role = role,
                 onCheckInClick = onCheckInClick,
-                onAttendanceHistoryClick = onAttendanceHistoryClick
+                onAttendanceHistoryClick = onAttendanceHistoryClick,
+                onAttendanceMonitorClick = onAttendanceMonitorClick
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -227,9 +230,13 @@ private fun WeekSelectorCard(
 
 @Composable
 private fun DashboardMenu(
+    role: String,
     onCheckInClick: () -> Unit,
-    onAttendanceHistoryClick: () -> Unit
+    onAttendanceHistoryClick: () -> Unit,
+    onAttendanceMonitorClick: () -> Unit
 ) {
+    val isAdminOrManager = role == "ADMIN" || role == "MANAGER"
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MenuButton("Horário", selected = true, onClick = {}, modifier = Modifier.weight(1f))
@@ -244,6 +251,18 @@ private fun DashboardMenu(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MenuButton("Férias", selected = false, onClick = {}, modifier = Modifier.weight(1f))
             MenuButton("Ausências", selected = false, onClick = {}, modifier = Modifier.weight(1f))
+        }
+
+        if (isAdminOrManager) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MenuButton(
+                    "Monitorização",
+                    selected = false,
+                    onClick = onAttendanceMonitorClick,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.weight(1f))
+            }
         }
     }
 }
