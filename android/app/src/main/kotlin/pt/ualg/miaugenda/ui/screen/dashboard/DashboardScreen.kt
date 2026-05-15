@@ -50,6 +50,7 @@ fun DashboardScreen(
     onProfileClick: () -> Unit = {},
     onAttendanceHistoryClick: () -> Unit = {},
     onAttendanceMonitorClick: () -> Unit = {},
+    onUsersClick: () -> Unit = {},
     viewModel: DashboardViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -106,7 +107,8 @@ fun DashboardScreen(
                 role = role,
                 onCheckInClick = onCheckInClick,
                 onAttendanceHistoryClick = onAttendanceHistoryClick,
-                onAttendanceMonitorClick = onAttendanceMonitorClick
+                onAttendanceMonitorClick = onAttendanceMonitorClick,
+                onUsersClick = onUsersClick
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -233,7 +235,8 @@ private fun DashboardMenu(
     role: String,
     onCheckInClick: () -> Unit,
     onAttendanceHistoryClick: () -> Unit,
-    onAttendanceMonitorClick: () -> Unit
+    onAttendanceMonitorClick: () -> Unit,
+    onUsersClick: () -> Unit
 ) {
     val isAdminOrManager = role == "ADMIN" || role == "MANAGER"
 
@@ -261,7 +264,12 @@ private fun DashboardMenu(
                     onClick = onAttendanceMonitorClick,
                     modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.weight(1f))
+                MenuButton(
+                    "Utilizadores",
+                    selected = false,
+                    onClick = onUsersClick,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }

@@ -13,5 +13,6 @@ data class User(
     val email: String,
     val contact: String?,
     val role: String,
-    val category: String
+    val category: String,
+    val active: Boolean = true
 )
