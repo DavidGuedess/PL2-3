@@ -10,4 +10,9 @@ interface ShiftApi {
     suspend fun getMyShifts(
         @Query("week") week: String? = null
     ): Response<List<Shift>>
+
+    @GET("/shifts/me")
+    suspend fun getMyOwnShifts(
+        @Query("week") week: String? = null
+    ): Response<List<Shift>>
 }

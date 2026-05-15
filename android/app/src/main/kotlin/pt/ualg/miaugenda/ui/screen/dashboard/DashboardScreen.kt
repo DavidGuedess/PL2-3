@@ -50,6 +50,7 @@ fun DashboardScreen(
     onProfileClick: () -> Unit = {},
     onAttendanceHistoryClick: () -> Unit = {},
     onAttendanceMonitorClick: () -> Unit = {},
+    onMyScheduleClick: () -> Unit = {},
     viewModel: DashboardViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -106,7 +107,8 @@ fun DashboardScreen(
                 role = role,
                 onCheckInClick = onCheckInClick,
                 onAttendanceHistoryClick = onAttendanceHistoryClick,
-                onAttendanceMonitorClick = onAttendanceMonitorClick
+                onAttendanceMonitorClick = onAttendanceMonitorClick,
+                onMyScheduleClick = onMyScheduleClick
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -233,13 +235,14 @@ private fun DashboardMenu(
     role: String,
     onCheckInClick: () -> Unit,
     onAttendanceHistoryClick: () -> Unit,
-    onAttendanceMonitorClick: () -> Unit
+    onAttendanceMonitorClick: () -> Unit,
+    onMyScheduleClick: () -> Unit
 ) {
     val isAdminOrManager = role == "ADMIN" || role == "MANAGER"
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MenuButton("Horário", selected = true, onClick = {}, modifier = Modifier.weight(1f))
+            MenuButton("Horário", selected = true, onClick = onMyScheduleClick, modifier = Modifier.weight(1f))
             MenuButton("Presença", selected = false, onClick = onCheckInClick, modifier = Modifier.weight(1f))
         }
 
