@@ -8,7 +8,6 @@ jobs:
   backend:
     name: Backend - lint & test
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('backend/package.json') != '' }}
 
     services:
       postgres:
