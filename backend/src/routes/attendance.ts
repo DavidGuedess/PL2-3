@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticate, requireRole } from '../middleware/auth'
 import { createAttendance, getMyAttendance, getAttendanceReport, getAttendanceStats } from '../controllers/attendanceController'
+import { validate } from '../middleware/validate'
+import { createAttendanceSchema } from '../schemas'
 
 const router = Router()
 const prisma = new PrismaClient()
@@ -70,7 +72,7 @@ router.use(authenticate)
  *       401:
  *         description: Não autenticado
  */
-router.post('/', createAttendance)
+router.post('/', validate(createAttendanceSchema), createAttendance)
 
 /**
  * @openapi
