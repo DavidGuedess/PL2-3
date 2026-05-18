@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { login, logout, refresh } from '../controllers/authController';
 import { authenticate } from '../middleware/auth';
+import { loginRateLimiter, refreshRateLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
@@ -57,8 +58,10 @@ const router = Router();
  *         description: Campos obrigatórios em falta
  *       401:
  *         description: Credenciais inválidas
+ *       429:
+ *         description: Demasiadas tentativas de login
  */
-router.post('/login', login);
+router.post('/login', loginRateLimiter, login);
 
 /**
  * @openapi
@@ -92,8 +95,10 @@ router.post('/login', login);
  *         description: Refresh token em falta
  *       401:
  *         description: Refresh token inválido ou expirado
+ *       429:
+ *         description: Demasiados pedidos de refresh token
  */
-router.post('/refresh', refresh);
+router.post('/refresh', refreshRateLimiter, refresh);
 
 /**
  * @openapi
