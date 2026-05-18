@@ -33,6 +33,14 @@ jest.mock('@prisma/client', () => {
   return { PrismaClient: jest.fn(() => mockInstance) }
 })
 
+jest.mock('../utils/attendanceStats', () => ({
+  calculateAttendanceStats: jest.fn(() => ({
+    totalHoursWorked: 8,
+    daysWorked: 1,
+    overtimeHours: 0
+  }))
+}))
+
 import { PrismaClient } from '@prisma/client'
 
 const prismaInstance = new (PrismaClient as any)()
@@ -64,7 +72,8 @@ const mockShift = {
   userId: 1,
   shiftTypeId: 1,
   date: new Date('2026-04-10T00:00:00.000Z'),
-  user: { id: 1, name: 'Alice', employeeNumber: 'E001' }
+  user: { id: 1, name: 'Alice', employeeNumber: 'E001' },
+  shiftType: { id: 1, name: 'Manhã', startTime: '08:00', endTime: '16:00' }
 }
 
 const mockAttendanceIN = {
@@ -330,5 +339,89 @@ describe('GET /attendance/report (relatório - ADMIN/MANAGER)', () => {
 
     expect(res.status).toBe(200)
     expect(Array.isArray(res.body)).toBe(true)
+  })
+})
+
+describe('GET /attendance/stats (estatísticas de horas - ADMIN/MANAGER)', () => {
+  it('deve retornar 403 para EMPLOYEE', async () => {
+    const res = await request(app)
+      .get('/attendance/stats?userId=1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'EMPLOYEE')
+
+    expect(res.status).toBe(403)
+  })
+
+  it('deve retornar 400 se userId não for fornecido', async () => {
+    const res = await request(app)
+      .get('/attendance/stats')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+
+    expect(res.status).toBe(400)
+  })
+
+  it('deve retornar 400 se userId for inválido', async () => {
+    const res = await request(app)
+      .get('/attendance/stats?userId=abc')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+
+    expect(res.status).toBe(400)
+  })
+
+  it('deve retornar 404 se utilizador não existir', async () => {
+    mockUserFindUnique.mockResolvedValueOnce(null)
+
+    const res = await request(app)
+      .get('/attendance/stats?userId=999')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+
+    expect(res.status).toBe(404)
+  })
+
+  it('deve retornar estatísticas para ADMIN com userId válido', async () => {
+    mockFindMany.mockResolvedValueOnce([mockAttendanceIN])
+    mockShiftFindMany.mockResolvedValueOnce([mockShift])
+
+    const res = await request(app)
+      .get('/attendance/stats?userId=2')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({
+      userId: 2,
+      name: mockUser.name,
+      employeeNumber: mockUser.employeeNumber,
+      totalHoursWorked: expect.any(Number),
+      daysWorked: expect.any(Number),
+      overtimeHours: expect.any(Number)
+    })
+  })
+
+  it('deve retornar estatísticas para MANAGER com userId válido', async () => {
+    mockFindMany.mockResolvedValueOnce([mockAttendanceIN])
+    mockShiftFindMany.mockResolvedValueOnce([mockShift])
+
+    const res = await request(app)
+      .get('/attendance/stats?userId=2')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'MANAGER')
+
+    expect(res.status).toBe(200)
+  })
+
+  it('deve aceitar filtros from e to', async () => {
+    mockFindMany.mockResolvedValueOnce([mockAttendanceIN])
+    mockShiftFindMany.mockResolvedValueOnce([mockShift])
+
+    const res = await request(app)
+      .get('/attendance/stats?userId=2&from=2026-04-01&to=2026-04-30')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+
+    expect(res.status).toBe(200)
   })
 })
