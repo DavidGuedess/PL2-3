@@ -203,6 +203,50 @@ export const getAttendanceStats = async (req: Request, res: Response, next: Next
   }
 }
 
+export const updateAttendanceRecord = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseInt(req.params.id)
+    const { type, timestamp } = req.body
+
+    const existing = await prisma.attendanceRecord.findUnique({ where: { id } })
+    if (!existing) {
+      return res.status(404).json({ message: 'Attendance record not found' })
+    }
+
+    const data: { type?: string; timestamp?: Date } = {}
+    if (type !== undefined) data.type = type
+    if (timestamp !== undefined) data.timestamp = new Date(timestamp)
+
+    const updated = await prisma.attendanceRecord.update({
+      where: { id },
+      data,
+      include: {
+        user: { select: { id: true, name: true, employeeNumber: true } }
+      }
+    })
+
+    return res.status(200).json(updated)
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const deleteAttendanceRecord = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseInt(req.params.id)
+
+    const existing = await prisma.attendanceRecord.findUnique({ where: { id } })
+    if (!existing) {
+      return res.status(404).json({ message: 'Attendance record not found' })
+    }
+
+    await prisma.attendanceRecord.delete({ where: { id } })
+    return res.status(204).send()
+  } catch (err) {
+    next(err)
+  }
+}
+
 export const getMyAttendance = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId

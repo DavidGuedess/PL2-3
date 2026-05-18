@@ -1,9 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticate, requireRole } from '../middleware/auth'
-import { createAttendance, getMyAttendance, getAttendanceReport, getAttendanceStats } from '../controllers/attendanceController'
+import { createAttendance, getMyAttendance, getAttendanceReport, getAttendanceStats, updateAttendanceRecord, deleteAttendanceRecord } from '../controllers/attendanceController'
 import { validate } from '../middleware/validate'
-import { createAttendanceSchema } from '../schemas'
+import { createAttendanceSchema, updateAttendanceSchema } from '../schemas'
 
 const router = Router()
 const prisma = new PrismaClient()
@@ -328,5 +328,77 @@ router.get('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Respo
     next(err)
   }
 })
+
+/**
+ * @openapi
+ * /attendance/{id}:
+ *   patch:
+ *     summary: Corrigir um registo de ponto (Admin/Gestor)
+ *     tags: [Registos de Ponto]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               type:
+ *                 type: string
+ *                 enum: [IN, OUT]
+ *               timestamp:
+ *                 type: string
+ *                 format: date-time
+ *                 example: "2026-04-10T08:00:00.000Z"
+ *     responses:
+ *       200:
+ *         description: Registo atualizado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AttendanceRecord'
+ *       400:
+ *         description: Nenhum campo fornecido ou valores inválidos
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
+ *       404:
+ *         description: Registo não encontrado
+ */
+router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateAttendanceSchema), updateAttendanceRecord)
+
+/**
+ * @openapi
+ * /attendance/{id}:
+ *   delete:
+ *     summary: Remover um registo de ponto incorreto (Admin/Gestor)
+ *     tags: [Registos de Ponto]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       204:
+ *         description: Registo removido
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
+ *       404:
+ *         description: Registo não encontrado
+ */
+router.delete('/:id', requireRole('ADMIN', 'MANAGER'), deleteAttendanceRecord)
 
 export default router

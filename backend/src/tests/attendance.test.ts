@@ -21,7 +21,10 @@ jest.mock('@prisma/client', () => {
     attendanceRecord: {
       create: jest.fn(),
       findMany: jest.fn(),
-      findFirst: jest.fn()
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn()
     },
     user: {
       findUnique: jest.fn()
@@ -47,6 +50,9 @@ const prismaInstance = new (PrismaClient as any)()
 const mockCreate = prismaInstance.attendanceRecord.create as jest.Mock
 const mockFindMany = prismaInstance.attendanceRecord.findMany as jest.Mock
 const mockFindFirst = prismaInstance.attendanceRecord.findFirst as jest.Mock
+const mockFindUnique = prismaInstance.attendanceRecord.findUnique as jest.Mock
+const mockUpdate = prismaInstance.attendanceRecord.update as jest.Mock
+const mockDelete = prismaInstance.attendanceRecord.delete as jest.Mock
 const mockUserFindUnique = prismaInstance.user.findUnique as jest.Mock
 const mockShiftFindMany = prismaInstance.shift.findMany as jest.Mock
 
@@ -88,6 +94,9 @@ beforeEach(() => {
   mockCreate.mockResolvedValue(mockRecord)
   mockFindMany.mockResolvedValue([mockRecord])
   mockFindFirst.mockResolvedValue(null)
+  mockFindUnique.mockResolvedValue(mockRecord)
+  mockUpdate.mockResolvedValue(mockRecord)
+  mockDelete.mockResolvedValue(mockRecord)
   mockUserFindUnique.mockResolvedValue(mockUser)
   mockShiftFindMany.mockResolvedValue([])
 })
@@ -423,5 +432,141 @@ describe('GET /attendance/stats (estatísticas de horas - ADMIN/MANAGER)', () =>
       .set('x-user-role', 'ADMIN')
 
     expect(res.status).toBe(200)
+  })
+})
+
+describe('PATCH /attendance/:id (correção de registo - ADMIN/MANAGER)', () => {
+  it('deve atualizar o type do registo (ADMIN)', async () => {
+    mockUpdate.mockResolvedValueOnce({ ...mockRecord, type: 'OUT' })
+
+    const res = await request(app)
+      .patch('/attendance/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ type: 'OUT' })
+
+    expect(res.status).toBe(200)
+    expect(res.body.type).toBe('OUT')
+  })
+
+  it('deve atualizar o timestamp do registo (MANAGER)', async () => {
+    const newTimestamp = '2026-04-10T09:00:00.000Z'
+    mockUpdate.mockResolvedValueOnce({ ...mockRecord, timestamp: newTimestamp })
+
+    const res = await request(app)
+      .patch('/attendance/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'MANAGER')
+      .send({ timestamp: newTimestamp })
+
+    expect(res.status).toBe(200)
+  })
+
+  it('deve atualizar type e timestamp simultaneamente', async () => {
+    const newTimestamp = '2026-04-10T09:00:00.000Z'
+    mockUpdate.mockResolvedValueOnce({ ...mockRecord, type: 'OUT', timestamp: newTimestamp })
+
+    const res = await request(app)
+      .patch('/attendance/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ type: 'OUT', timestamp: newTimestamp })
+
+    expect(res.status).toBe(200)
+    expect(res.body.type).toBe('OUT')
+  })
+
+  it('deve retornar 404 se o registo não existir', async () => {
+    mockFindUnique.mockResolvedValueOnce(null)
+
+    const res = await request(app)
+      .patch('/attendance/999')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ type: 'OUT' })
+
+    expect(res.status).toBe(404)
+    expect(res.body.message).toBe('Attendance record not found')
+  })
+
+  it('deve retornar 400 se nenhum campo for fornecido', async () => {
+    const res = await request(app)
+      .patch('/attendance/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({})
+
+    expect(res.status).toBe(400)
+  })
+
+  it('deve retornar 400 se o type for inválido', async () => {
+    const res = await request(app)
+      .patch('/attendance/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ type: 'INVALID' })
+
+    expect(res.status).toBe(400)
+  })
+
+  it('deve retornar 400 se o timestamp for inválido', async () => {
+    const res = await request(app)
+      .patch('/attendance/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+      .send({ timestamp: 'not-a-date' })
+
+    expect(res.status).toBe(400)
+  })
+
+  it('deve retornar 403 para EMPLOYEE', async () => {
+    const res = await request(app)
+      .patch('/attendance/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'EMPLOYEE')
+      .send({ type: 'OUT' })
+
+    expect(res.status).toBe(403)
+  })
+})
+
+describe('DELETE /attendance/:id (remoção de registo - ADMIN/MANAGER)', () => {
+  it('deve remover o registo com sucesso (ADMIN)', async () => {
+    const res = await request(app)
+      .delete('/attendance/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+
+    expect(res.status).toBe(204)
+  })
+
+  it('deve remover o registo com sucesso (MANAGER)', async () => {
+    const res = await request(app)
+      .delete('/attendance/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'MANAGER')
+
+    expect(res.status).toBe(204)
+  })
+
+  it('deve retornar 404 se o registo não existir', async () => {
+    mockFindUnique.mockResolvedValueOnce(null)
+
+    const res = await request(app)
+      .delete('/attendance/999')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'ADMIN')
+
+    expect(res.status).toBe(404)
+    expect(res.body.message).toBe('Attendance record not found')
+  })
+
+  it('deve retornar 403 para EMPLOYEE', async () => {
+    const res = await request(app)
+      .delete('/attendance/1')
+      .set('x-user-id', '1')
+      .set('x-user-role', 'EMPLOYEE')
+
+    expect(res.status).toBe(403)
   })
 })

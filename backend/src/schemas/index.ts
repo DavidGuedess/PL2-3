@@ -53,3 +53,11 @@ export const updateShiftTypeSchema = z.object({
 export const createAttendanceSchema = z.object({
   type: z.enum(['IN', 'OUT'], { message: 'type must be IN or OUT' })
 })
+
+export const updateAttendanceSchema = z.object({
+  type: z.enum(['IN', 'OUT'], { message: 'type must be IN or OUT' }).optional(),
+  timestamp: z.string().datetime({ message: 'timestamp must be a valid ISO 8601 datetime' }).optional()
+}).refine(
+  data => data.type !== undefined || data.timestamp !== undefined,
+  { message: 'At least one field must be provided: type or timestamp' }
+)
