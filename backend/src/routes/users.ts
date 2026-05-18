@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express'
+import { Router, Request, Response, NextFunction } from 'express'
 import { PrismaClient, User } from '@prisma/client'
 import { UserRole, UserCategory } from '../types/user'
 import { hashPassword } from '../utils/password'
@@ -128,51 +128,55 @@ async function getAuthenticatedUser(req: Request): Promise<User | null> {
  *       403:
  *         description: Sem permissão (requer ADMIN ou MANAGER)
  */
-router.get('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
-  const { page, limit, name, role, category } = req.query
+router.get('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { page, limit, name, role, category } = req.query
 
-  const validRoles: UserRole[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
-  const validCategories: UserCategory[] = ['VETERINARIAN', 'NURSE', 'OPERATIONAL', 'ADMINISTRATIVE']
+    const validRoles: UserRole[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
+    const validCategories: UserCategory[] = ['VETERINARIAN', 'NURSE', 'OPERATIONAL', 'ADMINISTRATIVE']
 
-  if (role !== undefined && !validRoles.includes(role as UserRole)) {
-    return res.status(400).json({ message: 'Invalid role filter' })
+    if (role !== undefined && !validRoles.includes(role as UserRole)) {
+      return res.status(400).json({ message: 'Invalid role filter' })
+    }
+    if (category !== undefined && !validCategories.includes(category as UserCategory)) {
+      return res.status(400).json({ message: 'Invalid category filter' })
+    }
+
+    const pageNum = page !== undefined ? parseInt(page as string, 10) : undefined
+    const limitNum = limit !== undefined ? parseInt(limit as string, 10) : undefined
+
+    if (pageNum !== undefined && (isNaN(pageNum) || pageNum < 1)) {
+      return res.status(400).json({ message: 'page must be a positive integer' })
+    }
+    if (limitNum !== undefined && (isNaN(limitNum) || limitNum < 1)) {
+      return res.status(400).json({ message: 'limit must be a positive integer' })
+    }
+
+    const where: any = {}
+    if (name) where.name = { contains: name as string, mode: 'insensitive' }
+    if (role) where.role = role as string
+    if (category) where.category = category as string
+
+    if (pageNum !== undefined && limitNum !== undefined) {
+      const skip = (pageNum - 1) * limitNum
+      const [total, users] = await Promise.all([
+        prisma.user.count({ where }),
+        prisma.user.findMany({ where, orderBy: { name: 'asc' }, skip, take: limitNum })
+      ])
+      return res.status(200).json({
+        data: users.map(toPublic),
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum)
+      })
+    }
+
+    const allUsers = await prisma.user.findMany({ where, orderBy: { name: 'asc' } })
+    return res.status(200).json(allUsers.map(toPublic))
+  } catch (err) {
+    next(err)
   }
-  if (category !== undefined && !validCategories.includes(category as UserCategory)) {
-    return res.status(400).json({ message: 'Invalid category filter' })
-  }
-
-  const pageNum = page !== undefined ? parseInt(page as string, 10) : undefined
-  const limitNum = limit !== undefined ? parseInt(limit as string, 10) : undefined
-
-  if (pageNum !== undefined && (isNaN(pageNum) || pageNum < 1)) {
-    return res.status(400).json({ message: 'page must be a positive integer' })
-  }
-  if (limitNum !== undefined && (isNaN(limitNum) || limitNum < 1)) {
-    return res.status(400).json({ message: 'limit must be a positive integer' })
-  }
-
-  const where: any = {}
-  if (name) where.name = { contains: name as string, mode: 'insensitive' }
-  if (role) where.role = role as string
-  if (category) where.category = category as string
-
-  if (pageNum !== undefined && limitNum !== undefined) {
-    const skip = (pageNum - 1) * limitNum
-    const [total, users] = await Promise.all([
-      prisma.user.count({ where }),
-      prisma.user.findMany({ where, orderBy: { name: 'asc' }, skip, take: limitNum })
-    ])
-    return res.status(200).json({
-      data: users.map(toPublic),
-      total,
-      page: pageNum,
-      limit: limitNum,
-      totalPages: Math.ceil(total / limitNum)
-    })
-  }
-
-  const allUsers = await prisma.user.findMany({ where, orderBy: { name: 'asc' } })
-  return res.status(200).json(allUsers.map(toPublic))
 })
 
 /**
@@ -193,12 +197,16 @@ router.get('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Respo
  *       401:
  *         description: Não autenticado
  */
-router.get('/me', async (req: Request, res: Response) => {
-  const user = await getAuthenticatedUser(req)
-  if (!user) {
-    return res.status(401).json({ message: 'Unauthorized: Authenticated user not found' })
+router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await getAuthenticatedUser(req)
+    if (!user) {
+      return res.status(401).json({ message: 'Unauthorized: Authenticated user not found' })
+    }
+    return res.status(200).json(toPublic(user))
+  } catch (err) {
+    next(err)
   }
-  return res.status(200).json(toPublic(user))
 })
 
 /**
@@ -223,12 +231,16 @@ router.get('/me', async (req: Request, res: Response) => {
  *       404:
  *         description: Utilizador não encontrado
  */
-router.get('/:id', requireRole('ADMIN'), async (req: Request, res: Response) => {
-  const user = await prisma.user.findUnique({ where: { id: Number(req.params.id) } })
-  if (!user) {
-    return res.status(404).json({ message: 'User not found' })
+router.get('/:id', requireRole('ADMIN'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: Number(req.params.id) } })
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+    return res.status(200).json(toPublic(user))
+  } catch (err) {
+    next(err)
   }
-  return res.status(200).json(toPublic(user))
 })
 
 /**
@@ -261,35 +273,25 @@ router.get('/:id', requireRole('ADMIN'), async (req: Request, res: Response) => 
  *       409:
  *         description: Email ou número de funcionário já existe
  */
-router.post('/', requireRole('ADMIN'), validate(createUserSchema), async (req: Request, res: Response) => {
-  const { name, email, employeeNumber, role, category, password } = req.body
-
-  const normalizedName = name
-  const normalizedEmail = email
-  const normalizedEmployeeNumber = employeeNumber
-  const passwordHash = await hashPassword(password)
-
+router.post('/', requireRole('ADMIN'), validate(createUserSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const { name, email, employeeNumber, role, category, password } = req.body
+
+    const passwordHash = await hashPassword(password)
+
     const newUser = await prisma.user.create({
       data: {
-        name: normalizedName,
-        email: normalizedEmail,
-        employeeNumber: normalizedEmployeeNumber,
+        name,
+        email,
+        employeeNumber,
         passwordHash,
         role: role as UserRole,
         category: category as UserCategory,
       }
     })
     return res.status(201).json(toPublic(newUser))
-  } catch (error: any) {
-    if (error.code === 'P2002') {
-      const targets: string[] = error.meta?.target ?? []
-      if (targets.includes('email')) {
-        return res.status(409).json({ message: 'Email already exists' })
-      }
-      return res.status(409).json({ message: 'Employee number already exists' })
-    }
-    throw error
+  } catch (err) {
+    next(err)
   }
 })
 
@@ -329,21 +331,25 @@ router.post('/', requireRole('ADMIN'), validate(createUserSchema), async (req: R
  *       401:
  *         description: Não autenticado
  */
-router.patch('/me', validate(updateUserMeSchema), async (req: Request, res: Response) => {
-  const user = await getAuthenticatedUser(req)
-  if (!user) {
-    return res.status(401).json({ message: 'Unauthorized: Authenticated user not found' })
+router.patch('/me', validate(updateUserMeSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await getAuthenticatedUser(req)
+    if (!user) {
+      return res.status(401).json({ message: 'Unauthorized: Authenticated user not found' })
+    }
+
+    const { name, contact, password } = req.body
+
+    const data: Record<string, unknown> = {}
+    if (name !== undefined) data.name = name
+    if (contact !== undefined) data.contact = contact
+    if (password !== undefined) data.passwordHash = await hashPassword(password)
+
+    const updated = await prisma.user.update({ where: { id: user.id }, data })
+    return res.status(200).json(toPublic(updated))
+  } catch (err) {
+    next(err)
   }
-
-  const { name, contact, password } = req.body
-
-  const data: Record<string, unknown> = {}
-  if (name !== undefined) data.name = name
-  if (contact !== undefined) data.contact = contact
-  if (password !== undefined) data.passwordHash = await hashPassword(password)
-
-  const updated = await prisma.user.update({ where: { id: user.id }, data })
-  return res.status(200).json(toPublic(updated))
 })
 
 /**
@@ -370,20 +376,24 @@ router.patch('/me', validate(updateUserMeSchema), async (req: Request, res: Resp
  *       409:
  *         description: Utilizador já está desativado
  */
-router.patch('/:id/deactivate', requireRole('ADMIN'), async (req: Request, res: Response) => {
-  const userId = Number(req.params.id)
-  const user = await prisma.user.findUnique({ where: { id: userId } })
+router.patch('/:id/deactivate', requireRole('ADMIN'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = Number(req.params.id)
+    const user = await prisma.user.findUnique({ where: { id: userId } })
 
-  if (!user) {
-    return res.status(404).json({ message: 'User not found' })
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+
+    if (!user.active) {
+      return res.status(409).json({ message: 'User already deactivated' })
+    }
+
+    const updated = await prisma.user.update({ where: { id: userId }, data: { active: false } })
+    return res.status(200).json(toPublic(updated))
+  } catch (err) {
+    next(err)
   }
-
-  if (!user.active) {
-    return res.status(409).json({ message: 'User already deactivated' })
-  }
-
-  const updated = await prisma.user.update({ where: { id: userId }, data: { active: false } })
-  return res.status(200).json(toPublic(updated))
 })
 
 /**
@@ -410,20 +420,24 @@ router.patch('/:id/deactivate', requireRole('ADMIN'), async (req: Request, res: 
  *       409:
  *         description: Utilizador já está ativo
  */
-router.patch('/:id/activate', requireRole('ADMIN'), async (req: Request, res: Response) => {
-  const userId = Number(req.params.id)
-  const user = await prisma.user.findUnique({ where: { id: userId } })
+router.patch('/:id/activate', requireRole('ADMIN'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = Number(req.params.id)
+    const user = await prisma.user.findUnique({ where: { id: userId } })
 
-  if (!user) {
-    return res.status(404).json({ message: 'User not found' })
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+
+    if (user.active) {
+      return res.status(409).json({ message: 'User already active' })
+    }
+
+    const updated = await prisma.user.update({ where: { id: userId }, data: { active: true } })
+    return res.status(200).json(toPublic(updated))
+  } catch (err) {
+    next(err)
   }
-
-  if (user.active) {
-    return res.status(409).json({ message: 'User already active' })
-  }
-
-  const updated = await prisma.user.update({ where: { id: userId }, data: { active: true } })
-  return res.status(200).json(toPublic(updated))
 })
 
 export default router

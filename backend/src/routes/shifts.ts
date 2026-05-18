@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express'
+import { Router, Request, Response, NextFunction } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticate, requireRole } from '../middleware/auth'
 import { validate } from '../middleware/validate'
@@ -127,55 +127,59 @@ function getMonthRange(monthStr: string): { start: Date; end: Date } {
  *       409:
  *         description: Conflito de horário — o turno sobrepõe-se a um turno existente
  */
-router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftSchema), async (req: Request, res: Response) => {
-  const { userId, shiftTypeId, date } = req.body
+router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, shiftTypeId, date } = req.body
 
-  const user = await prisma.user.findUnique({ where: { id: userId } })
-  if (!user) {
-    return res.status(404).json({ message: 'User not found' })
-  }
-
-  const shiftType = await prisma.shiftType.findUnique({ where: { id: shiftTypeId } })
-  if (!shiftType) {
-    return res.status(404).json({ message: 'Shift type not found' })
-  }
-
-  const shiftDate = new Date(date)
-
-  const dayBefore = new Date(shiftDate)
-  dayBefore.setUTCDate(shiftDate.getUTCDate() - 1)
-  const dayAfter = new Date(shiftDate)
-  dayAfter.setUTCDate(shiftDate.getUTCDate() + 1)
-
-  const nearbyShifts = await prisma.shift.findMany({
-    where: { userId, date: { gte: dayBefore, lte: dayAfter } },
-    include: { shiftType: true }
-  })
-
-  const conflict = nearbyShifts.find(s =>
-    shiftsOverlap(shiftDate, shiftType.startTime, shiftType.endTime, s.date, s.shiftType.startTime, s.shiftType.endTime)
-  )
-
-  if (conflict) {
-    const conflictDate = new Date(conflict.date).toISOString().slice(0, 10)
-    return res.status(409).json({
-      message: `Shift conflict: '${shiftType.name}' (${shiftType.startTime}–${shiftType.endTime}) overlaps with existing shift '${conflict.shiftType.name}' (${conflict.shiftType.startTime}–${conflict.shiftType.endTime}) on ${conflictDate}`
-    })
-  }
-
-  const shift = await prisma.shift.create({
-    data: {
-      userId,
-      shiftTypeId,
-      date: shiftDate
-    },
-    include: {
-      user: { select: { id: true, name: true, employeeNumber: true } },
-      shiftType: true
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' })
     }
-  })
 
-  res.status(201).json(shift)
+    const shiftType = await prisma.shiftType.findUnique({ where: { id: shiftTypeId } })
+    if (!shiftType) {
+      return res.status(404).json({ message: 'Shift type not found' })
+    }
+
+    const shiftDate = new Date(date)
+
+    const dayBefore = new Date(shiftDate)
+    dayBefore.setUTCDate(shiftDate.getUTCDate() - 1)
+    const dayAfter = new Date(shiftDate)
+    dayAfter.setUTCDate(shiftDate.getUTCDate() + 1)
+
+    const nearbyShifts = await prisma.shift.findMany({
+      where: { userId, date: { gte: dayBefore, lte: dayAfter } },
+      include: { shiftType: true }
+    })
+
+    const conflict = nearbyShifts.find(s =>
+      shiftsOverlap(shiftDate, shiftType.startTime, shiftType.endTime, s.date, s.shiftType.startTime, s.shiftType.endTime)
+    )
+
+    if (conflict) {
+      const conflictDate = new Date(conflict.date).toISOString().slice(0, 10)
+      return res.status(409).json({
+        message: `Shift conflict: '${shiftType.name}' (${shiftType.startTime}–${shiftType.endTime}) overlaps with existing shift '${conflict.shiftType.name}' (${conflict.shiftType.startTime}–${conflict.shiftType.endTime}) on ${conflictDate}`
+      })
+    }
+
+    const shift = await prisma.shift.create({
+      data: {
+        userId,
+        shiftTypeId,
+        date: shiftDate
+      },
+      include: {
+        user: { select: { id: true, name: true, employeeNumber: true } },
+        shiftType: true
+      }
+    })
+
+    res.status(201).json(shift)
+  } catch (err) {
+    next(err)
+  }
 })
 
 /**
@@ -212,28 +216,32 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftSchema), a
  *       401:
  *         description: Não autenticado
  */
-router.get('/me', async (req: Request, res: Response) => {
-  const { week, month } = req.query
+router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { week, month } = req.query
 
-  if (!week && !month) {
-    return res.status(400).json({
-      message: 'Query param week or month is required (e.g. ?week=2026-03-23 or ?month=2026-03)'
+    if (!week && !month) {
+      return res.status(400).json({
+        message: 'Query param week or month is required (e.g. ?week=2026-03-23 or ?month=2026-03)'
+      })
+    }
+
+    const { start, end } = week
+      ? getWeekRange(week as string)
+      : getMonthRange(month as string)
+
+    const userId = req.user!.userId
+
+    const shifts = await prisma.shift.findMany({
+      where: { userId, date: { gte: start, lte: end } },
+      include: { shiftType: true },
+      orderBy: { date: 'asc' }
     })
+
+    res.json(shifts)
+  } catch (err) {
+    next(err)
   }
-
-  const { start, end } = week
-    ? getWeekRange(week as string)
-    : getMonthRange(month as string)
-
-  const userId = req.user!.userId
-
-  const shifts = await prisma.shift.findMany({
-    where: { userId, date: { gte: start, lte: end } },
-    include: { shiftType: true },
-    orderBy: { date: 'asc' }
-  })
-
-  res.json(shifts)
 })
 
 /**
@@ -270,64 +278,68 @@ router.get('/me', async (req: Request, res: Response) => {
  *       401:
  *         description: Não autenticado
  */
-router.get('/', async (req: Request, res: Response) => {
-  const { week, month } = req.query
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { week, month } = req.query
 
-  if (!week && !month) {
-    return res.status(400).json({
-      message: 'Query param week or month is required (e.g. ?week=2026-03-23 or ?month=2026-03)'
+    if (!week && !month) {
+      return res.status(400).json({
+        message: 'Query param week or month is required (e.g. ?week=2026-03-23 or ?month=2026-03)'
+      })
+    }
+
+    if (week && typeof week !== 'string') {
+      return res.status(400).json({ message: 'week must be a string in format YYYY-MM-DD' })
+    }
+
+    if (month && typeof month !== 'string') {
+      return res.status(400).json({ message: 'month must be a string in format YYYY-MM' })
+    }
+
+    let start: Date
+    let end: Date
+
+    if (week) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) {
+        return res.status(400).json({ message: 'Invalid week format. Use YYYY-MM-DD' })
+      }
+
+      const range = getWeekRange(week)
+
+      if (isNaN(range.start.getTime()) || isNaN(range.end.getTime())) {
+        return res.status(400).json({ message: 'Invalid week date' })
+      }
+
+      start = range.start
+      end = range.end
+    } else {
+      if (!/^\d{4}-\d{2}$/.test(month as string)) {
+        return res.status(400).json({ message: 'Invalid month format. Use YYYY-MM' })
+      }
+
+      const range = getMonthRange(month as string)
+
+      if (isNaN(range.start.getTime()) || isNaN(range.end.getTime())) {
+        return res.status(400).json({ message: 'Invalid month date' })
+      }
+
+      start = range.start
+      end = range.end
+    }
+
+    const shifts = await prisma.shift.findMany({
+      where: { date: { gte: start, lte: end } },
+      include: {
+        user: { select: { id: true, name: true, employeeNumber: true, role: true } },
+        shiftType: true
+      },
+      orderBy: [{ date: 'asc' }, { user: { name: 'asc' } }]
     })
+
+    res.json(shifts)
+  } catch (err) {
+    next(err)
   }
-
-  if (week && typeof week !== 'string') {
-    return res.status(400).json({ message: 'week must be a string in format YYYY-MM-DD' })
-  }
-
-  if (month && typeof month !== 'string') {
-    return res.status(400).json({ message: 'month must be a string in format YYYY-MM' })
-  }
-
-  let start: Date
-  let end: Date
-
-  if (week) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) {
-      return res.status(400).json({ message: 'Invalid week format. Use YYYY-MM-DD' })
-    }
-
-    const range = getWeekRange(week)
-
-    if (isNaN(range.start.getTime()) || isNaN(range.end.getTime())) {
-      return res.status(400).json({ message: 'Invalid week date' })
-    }
-
-    start = range.start
-    end = range.end
-  } else {
-    if (!/^\d{4}-\d{2}$/.test(month as string)) {
-      return res.status(400).json({ message: 'Invalid month format. Use YYYY-MM' })
-    }
-
-    const range = getMonthRange(month as string)
-
-    if (isNaN(range.start.getTime()) || isNaN(range.end.getTime())) {
-      return res.status(400).json({ message: 'Invalid month date' })
-    }
-
-    start = range.start
-    end = range.end
-  }
-
-  const shifts = await prisma.shift.findMany({
-    where: { date: { gte: start, lte: end } },
-    include: {
-      user: { select: { id: true, name: true, employeeNumber: true, role: true } },
-      shiftType: true
-    },
-    orderBy: [{ date: 'asc' }, { user: { name: 'asc' } }]
-  })
-
-  res.json(shifts)
 })
 
 /**
@@ -375,46 +387,50 @@ router.get('/', async (req: Request, res: Response) => {
  *       409:
  *         description: Funcionário já tem turno nessa data
  */
-router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateShiftSchema), async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id)
-  const { shiftTypeId, date } = req.body
+router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateShiftSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseInt(req.params.id)
+    const { shiftTypeId, date } = req.body
 
-  const existing = await prisma.shift.findUnique({ where: { id } })
-  if (!existing) {
-    return res.status(404).json({ message: 'Shift not found' })
-  }
-
-  if (shiftTypeId) {
-    const shiftType = await prisma.shiftType.findUnique({ where: { id: shiftTypeId } })
-    if (!shiftType) {
-      return res.status(404).json({ message: 'Shift type not found' })
+    const existing = await prisma.shift.findUnique({ where: { id } })
+    if (!existing) {
+      return res.status(404).json({ message: 'Shift not found' })
     }
-  }
 
-  if (date) {
-    const shiftDate = new Date(date)
-    const conflict = await prisma.shift.findUnique({
-      where: { userId_date: { userId: existing.userId, date: shiftDate } }
+    if (shiftTypeId) {
+      const shiftType = await prisma.shiftType.findUnique({ where: { id: shiftTypeId } })
+      if (!shiftType) {
+        return res.status(404).json({ message: 'Shift type not found' })
+      }
+    }
+
+    if (date) {
+      const shiftDate = new Date(date)
+      const conflict = await prisma.shift.findUnique({
+        where: { userId_date: { userId: existing.userId, date: shiftDate } }
+      })
+      if (conflict && conflict.id !== id) {
+        return res.status(409).json({ message: 'User already has a shift on this date' })
+      }
+    }
+
+    const updateData: { shiftTypeId?: number; date?: Date } = {}
+    if (shiftTypeId) updateData.shiftTypeId = shiftTypeId
+    if (date) updateData.date = new Date(date)
+
+    const shift = await prisma.shift.update({
+      where: { id },
+      data: updateData,
+      include: {
+        user: { select: { id: true, name: true, employeeNumber: true } },
+        shiftType: true
+      }
     })
-    if (conflict && conflict.id !== id) {
-      return res.status(409).json({ message: 'User already has a shift on this date' })
-    }
+
+    res.json(shift)
+  } catch (err) {
+    next(err)
   }
-
-  const updateData: { shiftTypeId?: number; date?: Date } = {}
-  if (shiftTypeId) updateData.shiftTypeId = shiftTypeId
-  if (date) updateData.date = new Date(date)
-
-  const shift = await prisma.shift.update({
-    where: { id },
-    data: updateData,
-    include: {
-      user: { select: { id: true, name: true, employeeNumber: true } },
-      shiftType: true
-    }
-  })
-
-  res.json(shift)
 })
 
 /**
@@ -441,16 +457,20 @@ router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateShiftSchema
  *       404:
  *         description: Turno não encontrado
  */
-router.delete('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id)
+router.delete('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseInt(req.params.id)
 
-  const existing = await prisma.shift.findUnique({ where: { id } })
-  if (!existing) {
-    return res.status(404).json({ message: 'Shift not found' })
+    const existing = await prisma.shift.findUnique({ where: { id } })
+    if (!existing) {
+      return res.status(404).json({ message: 'Shift not found' })
+    }
+
+    await prisma.shift.delete({ where: { id } })
+    res.status(204).send()
+  } catch (err) {
+    next(err)
   }
-
-  await prisma.shift.delete({ where: { id } })
-  res.status(204).send()
 })
 
 export default router
