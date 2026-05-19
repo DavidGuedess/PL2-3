@@ -4,7 +4,8 @@ data class ShiftUser(
     val id: Int,
     val name: String,
     val employeeNumber: String,
-    val role: String
+    val role: String,
+    val category: String = ""
 )
 
 data class ShiftType(
@@ -19,6 +20,7 @@ data class Shift(
     val userId: Int,
     val shiftTypeId: Int,
     val date: String,
+    val published: Boolean = false,
     val user: ShiftUser? = null,
     val shiftType: ShiftType
 )

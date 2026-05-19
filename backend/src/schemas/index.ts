@@ -29,10 +29,11 @@ export const createShiftSchema = z.object({
 
 export const updateShiftSchema = z.object({
   shiftTypeId: z.coerce.number().int().positive().optional(),
-  date: z.string().regex(dateRegex, 'date must be in YYYY-MM-DD format').optional()
+  date: z.string().regex(dateRegex, 'date must be in YYYY-MM-DD format').optional(),
+  published: z.boolean().optional()
 }).refine(
-  data => data.shiftTypeId !== undefined || data.date !== undefined,
-  { message: 'shiftTypeId or date is required' }
+  data => data.shiftTypeId !== undefined || data.date !== undefined || data.published !== undefined,
+  { message: 'shiftTypeId, date or published is required' }
 )
 
 export const createShiftTypeSchema = z.object({
