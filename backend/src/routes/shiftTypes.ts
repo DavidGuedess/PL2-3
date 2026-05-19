@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express'
+import { Router, Request, Response, NextFunction } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticate, requireRole } from '../middleware/auth'
 import { validate } from '../middleware/validate'
@@ -82,36 +82,40 @@ router.use(authenticate)
  *       401:
  *         description: Não autenticado
  */
-router.get('/', async (req: Request, res: Response) => {
-  const { page, limit } = req.query
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { page, limit } = req.query
 
-  const pageNum = page !== undefined ? parseInt(page as string, 10) : undefined
-  const limitNum = limit !== undefined ? parseInt(limit as string, 10) : undefined
+    const pageNum = page !== undefined ? parseInt(page as string, 10) : undefined
+    const limitNum = limit !== undefined ? parseInt(limit as string, 10) : undefined
 
-  if (pageNum !== undefined && (isNaN(pageNum) || pageNum < 1)) {
-    return res.status(400).json({ message: 'page must be a positive integer' })
+    if (pageNum !== undefined && (isNaN(pageNum) || pageNum < 1)) {
+      return res.status(400).json({ message: 'page must be a positive integer' })
+    }
+    if (limitNum !== undefined && (isNaN(limitNum) || limitNum < 1)) {
+      return res.status(400).json({ message: 'limit must be a positive integer' })
+    }
+
+    if (pageNum !== undefined && limitNum !== undefined) {
+      const skip = (pageNum - 1) * limitNum
+      const [total, shiftTypes] = await Promise.all([
+        prisma.shiftType.count(),
+        prisma.shiftType.findMany({ orderBy: { name: 'asc' }, skip, take: limitNum })
+      ])
+      return res.status(200).json({
+        data: shiftTypes,
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum)
+      })
+    }
+
+    const shiftTypes = await prisma.shiftType.findMany({ orderBy: { name: 'asc' } })
+    return res.status(200).json(shiftTypes)
+  } catch (err) {
+    next(err)
   }
-  if (limitNum !== undefined && (isNaN(limitNum) || limitNum < 1)) {
-    return res.status(400).json({ message: 'limit must be a positive integer' })
-  }
-
-  if (pageNum !== undefined && limitNum !== undefined) {
-    const skip = (pageNum - 1) * limitNum
-    const [total, shiftTypes] = await Promise.all([
-      prisma.shiftType.count(),
-      prisma.shiftType.findMany({ orderBy: { name: 'asc' }, skip, take: limitNum })
-    ])
-    return res.status(200).json({
-      data: shiftTypes,
-      total,
-      page: pageNum,
-      limit: limitNum,
-      totalPages: Math.ceil(total / limitNum)
-    })
-  }
-
-  const shiftTypes = await prisma.shiftType.findMany({ orderBy: { name: 'asc' } })
-  return res.status(200).json(shiftTypes)
 })
 
 /**
@@ -144,19 +148,23 @@ router.get('/', async (req: Request, res: Response) => {
  *       409:
  *         description: Já existe um tipo de turno com esse nome
  */
-router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftTypeSchema), async (req: Request, res: Response) => {
-  const { name, startTime, endTime } = req.body
+router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftTypeSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { name, startTime, endTime } = req.body
 
-  const existing = await prisma.shiftType.findUnique({ where: { name } })
-  if (existing) {
-    return res.status(409).json({ message: 'Shift type with this name already exists' })
+    const existing = await prisma.shiftType.findUnique({ where: { name } })
+    if (existing) {
+      return res.status(409).json({ message: 'Shift type with this name already exists' })
+    }
+
+    const shiftType = await prisma.shiftType.create({
+      data: { name, startTime, endTime }
+    })
+
+    res.status(201).json(shiftType)
+  } catch (err) {
+    next(err)
   }
-
-  const shiftType = await prisma.shiftType.create({
-    data: { name, startTime, endTime }
-  })
-
-  res.status(201).json(shiftType)
 })
 
 /**
@@ -192,21 +200,25 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftTypeSchema
  *       404:
  *         description: Tipo de turno não encontrado
  */
-router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateShiftTypeSchema), async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id)
-  const { name, startTime, endTime } = req.body
+router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateShiftTypeSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseInt(req.params.id)
+    const { name, startTime, endTime } = req.body
 
-  const existing = await prisma.shiftType.findUnique({ where: { id } })
-  if (!existing) {
-    return res.status(404).json({ message: 'Shift type not found' })
+    const existing = await prisma.shiftType.findUnique({ where: { id } })
+    if (!existing) {
+      return res.status(404).json({ message: 'Shift type not found' })
+    }
+
+    const shiftType = await prisma.shiftType.update({
+      where: { id },
+      data: { name, startTime, endTime }
+    })
+
+    res.json(shiftType)
+  } catch (err) {
+    next(err)
   }
-
-  const shiftType = await prisma.shiftType.update({
-    where: { id },
-    data: { name, startTime, endTime }
-  })
-
-  res.json(shiftType)
 })
 
 /**
@@ -233,16 +245,20 @@ router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateShiftTypeSc
  *       404:
  *         description: Tipo de turno não encontrado
  */
-router.delete('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id)
+router.delete('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseInt(req.params.id)
 
-  const existing = await prisma.shiftType.findUnique({ where: { id } })
-  if (!existing) {
-    return res.status(404).json({ message: 'Shift type not found' })
+    const existing = await prisma.shiftType.findUnique({ where: { id } })
+    if (!existing) {
+      return res.status(404).json({ message: 'Shift type not found' })
+    }
+
+    await prisma.shiftType.delete({ where: { id } })
+    res.status(204).send()
+  } catch (err) {
+    next(err)
   }
-
-  await prisma.shiftType.delete({ where: { id } })
-  res.status(204).send()
 })
 
 export default router
