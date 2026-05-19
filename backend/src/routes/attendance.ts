@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticate, requireRole } from '../middleware/auth'
-import { createAttendance, getMyAttendance, getAttendanceReport } from '../controllers/attendanceController'
+import { createAttendance, getMyAttendance, getAttendanceReport, getAttendanceStats } from '../controllers/attendanceController'
 
 const router = Router()
 const prisma = new PrismaClient()
@@ -165,6 +165,67 @@ router.get('/me', getMyAttendance)
  *         description: Utilizador não encontrado
  */
 router.get('/report', requireRole('ADMIN', 'MANAGER'), getAttendanceReport)
+
+/**
+ * @openapi
+ * /attendance/stats:
+ *   get:
+ *     summary: Estatísticas de horas trabalhadas por utilizador (Admin/Gestor)
+ *     tags: [Registos de Ponto]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID do utilizador
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Data de início (ex. 2026-04-01)
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Data de fim (ex. 2026-04-30)
+ *     responses:
+ *       200:
+ *         description: Estatísticas de horas trabalhadas
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 userId:
+ *                   type: integer
+ *                 name:
+ *                   type: string
+ *                 employeeNumber:
+ *                   type: string
+ *                 totalHoursWorked:
+ *                   type: number
+ *                   description: Total de horas trabalhadas (soma dos pares IN/OUT)
+ *                 daysWorked:
+ *                   type: integer
+ *                   description: Número de dias com pelo menos um par IN/OUT completo
+ *                 overtimeHours:
+ *                   type: number
+ *                   description: Horas extra além da duração do turno atribuído
+ *       400:
+ *         description: userId em falta ou inválido
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
+ *       404:
+ *         description: Utilizador não encontrado
+ */
+router.get('/stats', requireRole('ADMIN', 'MANAGER'), getAttendanceStats)
 
 /**
  * @openapi

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
+import { calculateAttendanceStats } from '../utils/attendanceStats'
 
 const prisma = new PrismaClient()
 
@@ -136,6 +137,62 @@ export const createAttendance = async (req: Request, res: Response) => {
   })
 
   return res.status(201).json(record)
+}
+
+export const getAttendanceStats = async (req: Request, res: Response) => {
+  const { userId, from, to } = req.query
+
+  if (!userId) {
+    return res.status(400).json({ message: 'userId query param is required' })
+  }
+
+  const userIdNum = Number(userId)
+  if (!Number.isInteger(userIdNum) || userIdNum <= 0) {
+    return res.status(400).json({ message: 'userId must be a valid integer' })
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userIdNum } })
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' })
+  }
+
+  const recordsWhere: any = { userId: userIdNum }
+  const shiftsWhere: any = { userId: userIdNum }
+
+  if (from || to) {
+    recordsWhere.timestamp = {}
+    shiftsWhere.date = {}
+    if (from) {
+      recordsWhere.timestamp.gte = new Date(from as string)
+      shiftsWhere.date.gte = new Date(from as string)
+    }
+    if (to) {
+      const toDate = new Date(to as string)
+      toDate.setUTCHours(23, 59, 59, 999)
+      recordsWhere.timestamp.lte = toDate
+      shiftsWhere.date.lte = new Date(to as string)
+    }
+  }
+
+  const [records, shifts] = await Promise.all([
+    prisma.attendanceRecord.findMany({
+      where: recordsWhere,
+      orderBy: { timestamp: 'asc' }
+    }),
+    prisma.shift.findMany({
+      where: shiftsWhere,
+      include: { shiftType: true }
+    })
+  ])
+
+  const stats = calculateAttendanceStats(records, shifts)
+
+  return res.status(200).json({
+    userId: userIdNum,
+    name: user.name,
+    employeeNumber: user.employeeNumber,
+    ...stats
+  })
 }
 
 export const getMyAttendance = async (req: Request, res: Response) => {
