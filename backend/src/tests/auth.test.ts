@@ -4,6 +4,10 @@ import { PrismaClient } from '@prisma/client'
 import * as tokenBlacklistService from '../services/tokenBlacklist'
 import * as refreshTokenService from '../services/refreshToken'
 
+jest.mock('express-rate-limit', () => {
+  return jest.fn(() => (_req: unknown, _res: unknown, next: () => void) => next())
+})
+
 jest.mock('@prisma/client', () => {
   const mockInstance = { user: { findUnique: jest.fn() } }
   return { PrismaClient: jest.fn(() => mockInstance) }
