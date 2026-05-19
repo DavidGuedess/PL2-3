@@ -99,10 +99,6 @@ export const createAttendance = async (req: Request, res: Response) => {
   const { type } = req.body
   const userId = req.user!.userId
 
-  if (!type || !['IN', 'OUT'].includes(type)) {
-    return res.status(400).json({ message: 'type must be IN or OUT' })
-  }
-
   const lastRecord = await prisma.attendanceRecord.findFirst({
     where: { userId },
     orderBy: { timestamp: 'desc' }

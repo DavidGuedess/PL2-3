@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticate, requireRole } from '../middleware/auth'
+import { validate } from '../middleware/validate'
+import { createShiftTypeSchema, updateShiftTypeSchema } from '../schemas'
 
 const router = Router()
 const prisma = new PrismaClient()
@@ -142,12 +144,8 @@ router.get('/', async (req: Request, res: Response) => {
  *       409:
  *         description: Já existe um tipo de turno com esse nome
  */
-router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftTypeSchema), async (req: Request, res: Response) => {
   const { name, startTime, endTime } = req.body
-
-  if (!name || !startTime || !endTime) {
-    return res.status(400).json({ message: 'name, startTime and endTime are required' })
-  }
 
   const existing = await prisma.shiftType.findUnique({ where: { name } })
   if (existing) {
@@ -194,7 +192,7 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Resp
  *       404:
  *         description: Tipo de turno não encontrado
  */
-router.patch('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateShiftTypeSchema), async (req: Request, res: Response) => {
   const id = parseInt(req.params.id)
   const { name, startTime, endTime } = req.body
 

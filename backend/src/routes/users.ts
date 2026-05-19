@@ -3,6 +3,8 @@ import { PrismaClient, User } from '@prisma/client'
 import { UserRole, UserCategory } from '../types/user'
 import { hashPassword } from '../utils/password'
 import { authenticate, requireRole } from '../middleware/auth'
+import { validate } from '../middleware/validate'
+import { createUserSchema, updateUserMeSchema } from '../schemas'
 
 /**
  * @openapi
@@ -259,35 +261,12 @@ router.get('/:id', requireRole('ADMIN'), async (req: Request, res: Response) => 
  *       409:
  *         description: Email ou número de funcionário já existe
  */
-router.post('/', requireRole('ADMIN'), async (req: Request, res: Response) => {
+router.post('/', requireRole('ADMIN'), validate(createUserSchema), async (req: Request, res: Response) => {
   const { name, email, employeeNumber, role, category, password } = req.body
 
-  const validRoles: UserRole[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
-  const validCategories: UserCategory[] = ['VETERINARIAN', 'NURSE', 'OPERATIONAL', 'ADMINISTRATIVE']
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-  if (typeof name !== 'string' || name.trim() === '') {
-    return res.status(400).json({ message: 'name is required and must be a non-empty string' })
-  }
-  if (typeof email !== 'string' || !emailRegex.test(email.trim().toLowerCase())) {
-    return res.status(400).json({ message: 'Invalid email format' })
-  }
-  if (typeof employeeNumber !== 'string' || employeeNumber.trim() === '') {
-    return res.status(400).json({ message: 'employeeNumber is required and must be a non-empty string' })
-  }
-  if (typeof role !== 'string' || !validRoles.includes(role as UserRole)) {
-    return res.status(400).json({ message: 'Invalid role' })
-  }
-  if (typeof category !== 'string' || !validCategories.includes(category as UserCategory)) {
-    return res.status(400).json({ message: 'Invalid category' })
-  }
-  if (typeof password !== 'string' || password.length < 6) {
-    return res.status(400).json({ message: 'password is required and must be at least 6 characters' })
-  }
-
-  const normalizedName = name.trim()
-  const normalizedEmail = email.trim().toLowerCase()
-  const normalizedEmployeeNumber = employeeNumber.trim()
+  const normalizedName = name
+  const normalizedEmail = email
+  const normalizedEmployeeNumber = employeeNumber
   const passwordHash = await hashPassword(password)
 
   try {
@@ -350,7 +329,7 @@ router.post('/', requireRole('ADMIN'), async (req: Request, res: Response) => {
  *       401:
  *         description: Não autenticado
  */
-router.patch('/me', async (req: Request, res: Response) => {
+router.patch('/me', validate(updateUserMeSchema), async (req: Request, res: Response) => {
   const user = await getAuthenticatedUser(req)
   if (!user) {
     return res.status(401).json({ message: 'Unauthorized: Authenticated user not found' })
@@ -358,31 +337,9 @@ router.patch('/me', async (req: Request, res: Response) => {
 
   const { name, contact, password } = req.body
 
-  if (name === undefined && contact === undefined && password === undefined) {
-    return res.status(400).json({ message: 'At least one field must be provided: name, contact or password' })
-  }
-
-  if (name !== undefined) {
-    if (typeof name !== 'string' || name.trim() === '') {
-      return res.status(400).json({ message: 'name must be a non-empty string' })
-    }
-  }
-
-  if (contact !== undefined) {
-    if (typeof contact !== 'string' || contact.trim() === '') {
-      return res.status(400).json({ message: 'contact must be a non-empty string' })
-    }
-  }
-
-  if (password !== undefined) {
-    if (typeof password !== 'string' || password.length < 6) {
-      return res.status(400).json({ message: 'password must be at least 6 characters' })
-    }
-  }
-
   const data: Record<string, unknown> = {}
-  if (name !== undefined) data.name = name.trim()
-  if (contact !== undefined) data.contact = contact.trim()
+  if (name !== undefined) data.name = name
+  if (contact !== undefined) data.contact = contact
   if (password !== undefined) data.passwordHash = await hashPassword(password)
 
   const updated = await prisma.user.update({ where: { id: user.id }, data })

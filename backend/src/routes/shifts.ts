@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticate, requireRole } from '../middleware/auth'
+import { validate } from '../middleware/validate'
+import { createShiftSchema, updateShiftSchema } from '../schemas'
 
 const router = Router()
 const prisma = new PrismaClient()
@@ -125,19 +127,15 @@ function getMonthRange(monthStr: string): { start: Date; end: Date } {
  *       409:
  *         description: Conflito de horário — o turno sobrepõe-se a um turno existente
  */
-router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftSchema), async (req: Request, res: Response) => {
   const { userId, shiftTypeId, date } = req.body
 
-  if (!userId || !shiftTypeId || !date) {
-    return res.status(400).json({ message: 'userId, shiftTypeId and date are required' })
-  }
-
-  const user = await prisma.user.findUnique({ where: { id: parseInt(userId) } })
+  const user = await prisma.user.findUnique({ where: { id: userId } })
   if (!user) {
     return res.status(404).json({ message: 'User not found' })
   }
 
-  const shiftType = await prisma.shiftType.findUnique({ where: { id: parseInt(shiftTypeId) } })
+  const shiftType = await prisma.shiftType.findUnique({ where: { id: shiftTypeId } })
   if (!shiftType) {
     return res.status(404).json({ message: 'Shift type not found' })
   }
@@ -150,7 +148,7 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Resp
   dayAfter.setUTCDate(shiftDate.getUTCDate() + 1)
 
   const nearbyShifts = await prisma.shift.findMany({
-    where: { userId: parseInt(userId), date: { gte: dayBefore, lte: dayAfter } },
+    where: { userId, date: { gte: dayBefore, lte: dayAfter } },
     include: { shiftType: true }
   })
 
@@ -167,8 +165,8 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Resp
 
   const shift = await prisma.shift.create({
     data: {
-      userId: parseInt(userId),
-      shiftTypeId: parseInt(shiftTypeId),
+      userId,
+      shiftTypeId,
       date: shiftDate
     },
     include: {
@@ -377,13 +375,9 @@ router.get('/', async (req: Request, res: Response) => {
  *       409:
  *         description: Funcionário já tem turno nessa data
  */
-router.patch('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateShiftSchema), async (req: Request, res: Response) => {
   const id = parseInt(req.params.id)
   const { shiftTypeId, date } = req.body
-
-  if (!shiftTypeId && !date) {
-    return res.status(400).json({ message: 'shiftTypeId or date is required' })
-  }
 
   const existing = await prisma.shift.findUnique({ where: { id } })
   if (!existing) {
@@ -391,7 +385,7 @@ router.patch('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: 
   }
 
   if (shiftTypeId) {
-    const shiftType = await prisma.shiftType.findUnique({ where: { id: parseInt(shiftTypeId) } })
+    const shiftType = await prisma.shiftType.findUnique({ where: { id: shiftTypeId } })
     if (!shiftType) {
       return res.status(404).json({ message: 'Shift type not found' })
     }
@@ -408,7 +402,7 @@ router.patch('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: 
   }
 
   const updateData: { shiftTypeId?: number; date?: Date } = {}
-  if (shiftTypeId) updateData.shiftTypeId = parseInt(shiftTypeId)
+  if (shiftTypeId) updateData.shiftTypeId = shiftTypeId
   if (date) updateData.date = new Date(date)
 
   const shift = await prisma.shift.update({
