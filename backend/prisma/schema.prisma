@@ -52,6 +52,7 @@ model Shift {
   userId      Int
   shiftTypeId Int
   date        DateTime  @db.Date
+  published   Boolean   @default(false)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   shiftType   ShiftType @relation(fields: [shiftTypeId], references: [id])
   createdAt   DateTime  @default(now())

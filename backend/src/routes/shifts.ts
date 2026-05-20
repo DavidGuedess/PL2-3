@@ -112,10 +112,6 @@ function getMonthRange(monthStr: string): { start: Date; end: Date } {
  *     responses:
  *       201:
  *         description: Turno atribuído
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Shift'
  *       400:
  *         description: Campos obrigatórios em falta
  *       401:
@@ -125,7 +121,7 @@ function getMonthRange(monthStr: string): { start: Date; end: Date } {
  *       404:
  *         description: Utilizador ou tipo de turno não encontrado
  *       409:
- *         description: Conflito de horário — o turno sobrepõe-se a um turno existente
+ *         description: Conflito de horário
  */
 router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -168,10 +164,11 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftSchema), a
       data: {
         userId,
         shiftTypeId,
-        date: shiftDate
+        date: shiftDate,
+        published: false
       },
       include: {
-        user: { select: { id: true, name: true, employeeNumber: true } },
+        user: { select: { id: true, name: true, employeeNumber: true, role: true, category: true } },
         shiftType: true
       }
     })
@@ -196,21 +193,13 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftSchema), a
  *         schema:
  *           type: string
  *           format: date
- *         description: Qualquer data da semana pretendida (ex. 2026-03-23)
  *       - in: query
  *         name: month
  *         schema:
  *           type: string
- *         description: Mês no formato YYYY-MM (ex. 2026-03)
  *     responses:
  *       200:
  *         description: Lista dos turnos do utilizador autenticado no período
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/Shift'
  *       400:
  *         description: Parâmetro week ou month obrigatório
  *       401:
@@ -258,21 +247,13 @@ router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
  *         schema:
  *           type: string
  *           format: date
- *         description: Qualquer data da semana pretendida (ex. 2026-03-23)
  *       - in: query
  *         name: month
  *         schema:
  *           type: string
- *         description: Mês no formato YYYY-MM (ex. 2026-03)
  *     responses:
  *       200:
  *         description: Lista de turnos no período
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/Shift'
  *       400:
  *         description: Parâmetro week ou month obrigatório
  *       401:
@@ -330,7 +311,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const shifts = await prisma.shift.findMany({
       where: { date: { gte: start, lte: end } },
       include: {
-        user: { select: { id: true, name: true, employeeNumber: true, role: true } },
+        user: { select: { id: true, name: true, employeeNumber: true, role: true, category: true } },
         shiftType: true
       },
       orderBy: [{ date: 'asc' }, { user: { name: 'asc' } }]
@@ -356,26 +337,9 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
  *         required: true
  *         schema:
  *           type: integer
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               shiftTypeId:
- *                 type: integer
- *                 example: 2
- *               date:
- *                 type: string
- *                 format: date
- *                 example: "2026-04-30"
  *     responses:
  *       200:
  *         description: Turno atualizado
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Shift'
  *       400:
  *         description: Nenhum campo fornecido para atualizar
  *       401:
@@ -390,7 +354,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateShiftSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id)
-    const { shiftTypeId, date } = req.body
+    const { shiftTypeId, date, published } = req.body
 
     const existing = await prisma.shift.findUnique({ where: { id } })
     if (!existing) {
@@ -414,15 +378,16 @@ router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateShiftSchema
       }
     }
 
-    const updateData: { shiftTypeId?: number; date?: Date } = {}
+    const updateData: { shiftTypeId?: number; date?: Date; published?: boolean } = {}
     if (shiftTypeId) updateData.shiftTypeId = shiftTypeId
     if (date) updateData.date = new Date(date)
+    if (published !== undefined) updateData.published = Boolean(published)
 
     const shift = await prisma.shift.update({
       where: { id },
       data: updateData,
       include: {
-        user: { select: { id: true, name: true, employeeNumber: true } },
+        user: { select: { id: true, name: true, employeeNumber: true, role: true, category: true } },
         shiftType: true
       }
     })
