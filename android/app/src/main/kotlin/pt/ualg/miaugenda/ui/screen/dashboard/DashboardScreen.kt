@@ -1,6 +1,8 @@
 package pt.ualg.miaugenda.ui.screen.dashboard
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,7 +26,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import pt.ualg.miaugenda.ui.components.AppBottomNav
+import pt.ualg.miaugenda.ui.components.NavTab
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +41,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import pt.ualg.miaugenda.MiauGendaApp
 import pt.ualg.miaugenda.data.model.Shift
+import pt.ualg.miaugenda.data.model.resolvedStartTime
+import pt.ualg.miaugenda.data.model.resolvedEndTime
+import pt.ualg.miaugenda.data.model.resolvedName
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
@@ -65,6 +73,8 @@ private enum class SubScreen {
     EmPausa, EmTurno, ShiftOffer, FolhasPonto
 }
 
+private enum class ClockState { NO_SHIFT, HAS_SHIFT, CLOCKED_IN }
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 @Composable
 fun DashboardScreen(
@@ -74,6 +84,8 @@ fun DashboardScreen(
     onAttendanceHistoryClick: () -> Unit = {},
     onAttendanceMonitorClick: () -> Unit = {},
     onSchedulerClick: () -> Unit = {},
+    onNotificationsClick: () -> Unit = {},
+    onInboxClick: () -> Unit = {},
     viewModel: DashboardViewModel = viewModel()
 ) {
     val context      = LocalContext.current
@@ -88,6 +100,8 @@ fun DashboardScreen(
     var subScreen        by remember { mutableStateOf(SubScreen.Home) }
     var showApproveDialog by remember { mutableStateOf(false) }
 
+    BackHandler(enabled = subScreen != SubScreen.Home) { subScreen = SubScreen.Home }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -96,14 +110,19 @@ fun DashboardScreen(
     ) {
         when (subScreen) {
             SubScreen.Home -> HomeScreen(
-                firstName        = firstName,
-                shifts           = uiState.shifts,
-                today            = today,
-                onNavigate       = { subScreen = it },
-                onLogout         = { tokenManager.clearTokens(); onLogout() },
-                onApprove        = { showApproveDialog = true },
-                onCheckIn        = onCheckInClick,
-                onSchedulerClick = onSchedulerClick
+                firstName             = firstName,
+                shifts                = uiState.shifts,
+                today                 = today,
+                isClocked             = uiState.isClocked,
+                clockedInSince        = uiState.clockedInSince,
+                onNavigate            = { subScreen = it },
+                onLogout              = { tokenManager.clearTokens(); onLogout() },
+                onApprove             = { showApproveDialog = true },
+                onClockIn             = { viewModel.clockIn {} },
+                onClockOut            = { viewModel.clockOut {} },
+                onSchedulerClick      = onSchedulerClick,
+                onNotificationsClick  = onNotificationsClick,
+                onInboxClick          = onInboxClick
             )
             SubScreen.TurnosAgendados    -> ScreenTurnosAgendados(onBack = { subScreen = SubScreen.Home })
             SubScreen.AguardaConfirmacao -> ScreenAguardaConfirmacao(onBack = { subScreen = SubScreen.Home })
@@ -111,7 +130,7 @@ fun DashboardScreen(
             SubScreen.EmPausa            -> ScreenEmPausa(onBack = { subScreen = SubScreen.Home })
             SubScreen.EmTurno            -> ScreenEmTurno(onBack = { subScreen = SubScreen.Home })
             SubScreen.ShiftOffer         -> ScreenShiftOffer(onBack = { subScreen = SubScreen.Home })
-            SubScreen.FolhasPonto        -> ScreenFolhasPonto(onBack = { subScreen = SubScreen.Home }, onSchedulerClick = onSchedulerClick)
+            SubScreen.FolhasPonto        -> ScreenFolhasPonto(onBack = { subScreen = SubScreen.Home }, onSchedulerClick = onSchedulerClick, onNotificationsClick = onNotificationsClick, onInboxClick = onInboxClick)
         }
         if (showApproveDialog) {
             ApproveDialog(onClose = { showApproveDialog = false })
@@ -125,55 +144,120 @@ private fun HomeScreen(
     firstName: String,
     shifts: List<Shift>,
     today: LocalDate,
+    isClocked: Boolean = false,
+    clockedInSince: String? = null,
     onNavigate: (SubScreen) -> Unit,
     onLogout: () -> Unit,
     onApprove: () -> Unit,
-    onCheckIn: () -> Unit,
-    onSchedulerClick: () -> Unit = {}
+    onClockIn: () -> Unit = {},
+    onClockOut: () -> Unit = {},
+    onSchedulerClick: () -> Unit = {},
+    onNotificationsClick: () -> Unit = {},
+    onInboxClick: () -> Unit = {}
 ) {
     var fabOpen by remember { mutableStateOf(false) }
 
-    // Timer de pausa: arranca em 2h08m48s e conta
-    var timerSec by remember { mutableIntStateOf(7728) }
-    LaunchedEffect(Unit) {
-        while (true) { delay(1000); timerSec++ }
+    // Só turnos PUBLICADOS contam para o registo de ponto
+    val todayShift = remember(shifts, today) {
+        shifts.firstOrNull { s ->
+            LocalDate.parse(s.date.substring(0, 10)) == today && s.published
+        }
+    }
+
+    // Estado do ponto derivado do ViewModel (backend)
+    val clockState = when {
+        isClocked    -> ClockState.CLOCKED_IN
+        todayShift != null -> ClockState.HAS_SHIFT
+        else         -> ClockState.NO_SHIFT
+    }
+
+    // Hora de entrada formatada a partir do timestamp ISO
+    val clockedInAt = remember(clockedInSince) {
+        clockedInSince?.let {
+            runCatching {
+                val instant = java.time.Instant.parse(it)
+                java.time.LocalDateTime
+                    .ofInstant(instant, java.time.ZoneId.systemDefault())
+                    .format(DateTimeFormatter.ofPattern("HH:mm"))
+            }.getOrDefault("")
+        } ?: ""
+    }
+
+    // Timer: inicializa com o elapsed real e conta a partir daí
+    var clockedInSec by remember { mutableIntStateOf(0) }
+    LaunchedEffect(clockedInSince) {
+        clockedInSec = clockedInSince?.let {
+            runCatching {
+                val since = java.time.Instant.parse(it)
+                java.time.Duration.between(since, java.time.Instant.now()).seconds
+                    .toInt().coerceAtLeast(0)
+            }.getOrDefault(0)
+        } ?: 0
+    }
+    LaunchedEffect(isClocked) {
+        if (isClocked) { while (true) { delay(1000); clockedInSec++ } }
     }
     val timerStr = String.format(
-        "%02d:%02d:%02d", timerSec / 3600, (timerSec % 3600) / 60, timerSec % 60
+        "%02d:%02d:%02d", clockedInSec / 3600, (clockedInSec % 3600) / 60, clockedInSec % 60
     )
 
+    // Dynamic greeting
+    val greetingWord = when (LocalTime.now().hour) {
+        in 5..11  -> "Bom dia"
+        in 12..18 -> "Boa tarde"
+        else      -> "Boa noite"
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 90.dp)
-        ) {
-            item { DashHeader(firstName, onLogout) }
+        Column(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 16.dp)
+            ) {
+                item { DashHeader(firstName, onLogout) }
 
-            item {
-                Text(
-                    text = buildAnnotatedString {
-                        withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold)) { append("Boa noite, ") }
-                        append("$firstName!")
-                    },
-                    color = Color.White,
-                    fontSize = 22.sp,
-                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 18.dp)
-                )
+                item {
+                    Text(
+                        text = buildAnnotatedString {
+                            withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold)) { append("$greetingWord, ") }
+                            append("$firstName!")
+                        },
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 18.dp)
+                    )
+                }
+
+                item {
+                    ClockInSection(
+                        clockState  = clockState,
+                        todayShift  = todayShift,
+                        timerStr    = timerStr,
+                        clockedInAt = clockedInAt,
+                        onClockIn   = onClockIn,
+                        onClockOut  = onClockOut
+                    )
+                }
+
+                item { SectionTitle("Pedidos para Si") }
+                item { TimeOffCard(onApprove) }
+                item { Spacer(Modifier.height(22.dp)) }
+
+                item { SectionTitle("Resumo de Hoje") }
+                item { TodaySnapshot(onNavigate) }
+                item { SectionTitle("Resumo da Semana") }
+                item { WeekSnapshot(onNavigate) }
+
+                item { SectionTitle("Esta Semana", topPad = 8.dp) }
+                item { EstaSemanaSection(shifts, today) }
+                item { Spacer(Modifier.height(28.dp)) }
             }
-
-            item { BreakBanner(timerStr) }
-            item { SectionTitle("Resumo de Hoje") }
-            item { TodaySnapshot(onNavigate) }
-            item { SectionTitle("Resumo da Semana") }
-            item { WeekSnapshot(onNavigate) }
-            item { TodayTasksRow() }
-            item { SectionTitle("Pedidos para Si") }
-            item { TimeOffCard(onApprove) }
-            item { Spacer(Modifier.height(12.dp)) }
-            item { ShiftOfferCard(onTap = { onNavigate(SubScreen.ShiftOffer) }) }
-            item { SectionTitle("Esta Semana", topPad = 22.dp) }
-            item { EstaSemanaSection(shifts, today) }
-            item { Spacer(Modifier.height(28.dp)) }
+            AppBottomNav(
+                active               = NavTab.HOME,
+                onSchedulerClick     = onSchedulerClick,
+                onNotificationsClick = onNotificationsClick,
+                onInboxClick         = onInboxClick
+            )
         }
 
         // FAB overlay
@@ -187,17 +271,14 @@ private fun HomeScreen(
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(end = 20.dp, bottom = 115.dp),
+                        .padding(end = 20.dp, bottom = 86.dp),
                     horizontalAlignment = Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(22.dp)
                 ) {
-                    FabMenuItem("Nova Folha de Ponto", Icons.Outlined.AccessTime) {
-                        fabOpen = false; onCheckIn()
-                    }
-                    FabMenuItem("Novo Pedido de Folga", Icons.Outlined.EventBusy) {
+                    FabMenuItem("Novo Pedido de Troca", Icons.Outlined.SwapHoriz) {
                         fabOpen = false
                     }
-                    FabMenuItem("Adicionar Disponibilidade", Icons.Outlined.EventAvailable) {
+                    FabMenuItem("Novo Pedido de Folga", Icons.Outlined.EventBusy) {
                         fabOpen = false
                     }
                 }
@@ -208,7 +289,7 @@ private fun HomeScreen(
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 18.dp, bottom = 94.dp)
+                .padding(end = 18.dp, bottom = 80.dp)
                 .size(54.dp)
                 .clip(CircleShape)
                 .background(Blue)
@@ -221,10 +302,6 @@ private fun HomeScreen(
                 tint = Color.White,
                 modifier = Modifier.size(24.dp)
             )
-        }
-
-        Box(modifier = Modifier.align(Alignment.BottomCenter)) {
-            BottomNav(onSchedulerClick = onSchedulerClick)
         }
     }
 }
@@ -283,40 +360,173 @@ private fun DashHeader(firstName: String, onLogout: () -> Unit) {
     }
 }
 
-// ── BreakBanner ───────────────────────────────────────────────────────────────
+// ── ClockInSection ────────────────────────────────────────────────────────────
 @Composable
-private fun BreakBanner(timerStr: String) {
-    Box(
-        modifier = Modifier
-            .padding(horizontal = 14.dp)
-            .padding(bottom = 22.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(DkSurface)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text("Pausa iniciada às 21:00", color = Blue, fontSize = 12.sp)
-            Spacer(Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+private fun ClockInSection(
+    clockState: ClockState,
+    todayShift: Shift?,
+    timerStr: String,
+    clockedInAt: String,
+    onClockIn: () -> Unit,
+    onClockOut: () -> Unit
+) {
+    // Late calculation
+    val now = LocalTime.now()
+    val shiftStart = todayShift?.let {
+        runCatching { LocalTime.parse(it.resolvedStartTime()) }.getOrNull()
+    }
+    val isLate = shiftStart != null && now.isAfter(shiftStart) && clockState == ClockState.HAS_SHIFT
+    val lateMin = if (isLate) java.time.Duration.between(shiftStart, now).toMinutes() else 0L
+    val lateHrs = lateMin / 60
+    val lateRemMin = lateMin % 60
+
+    when (clockState) {
+        ClockState.NO_SHIFT -> {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 14.dp)
+                    .padding(bottom = 22.dp)
             ) {
-                Text("6:00p - 3:00a", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(timerStr, color = Orange, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-                    Icon(Icons.Outlined.AccessTime, contentDescription = null, tint = Orange, modifier = Modifier.size(20.dp))
+                OutlinedButton(
+                    onClick = onClockIn,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.5.dp, Blue),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Blue)
+                ) {
+                    Text(
+                        "Registar Entrada",
+                        color = Blue,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Sem turno agendado — a registar como não programado.",
+                    color = TxtGray,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        ClockState.HAS_SHIFT -> {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 14.dp)
+                    .padding(bottom = 22.dp)
+            ) {
+                if (isLate) {
+                    val lateMsg = when {
+                        lateHrs > 0 -> "Está $lateHrs hora${if (lateHrs > 1) "s" else ""} e $lateRemMin minutos atrasado!"
+                        else        -> "Está $lateMin minutos atrasado!"
+                    }
+                    Text(lateMsg, color = Color(0xFFFF3B30), fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp))
+                }
+                todayShift?.let {
+                    Text(
+                        "${it.resolvedStartTime()} - ${it.resolvedEndTime()}",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                }
+                Button(
+                    onClick = onClockIn,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Blue)
+                ) {
+                    Text(
+                        "Registar Entrada",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
                 }
             }
-            Spacer(Modifier.height(14.dp))
-            Button(
-                onClick = {},
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Blue)
+        }
+
+        ClockState.CLOCKED_IN -> {
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 14.dp)
+                    .padding(bottom = 22.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Blue)
             ) {
-                Icon(Icons.Outlined.Alarm, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(9.dp))
-                Text("Terminar Pausa", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Entrada registada às $clockedInAt",
+                            color = Color.White.copy(alpha = 0.75f),
+                            fontSize = 12.sp
+                        )
+                        Text(timerStr, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    todayShift?.let {
+                        Text(
+                            "${it.resolvedStartTime()} - ${it.resolvedEndTime()}",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Break button
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Outlined.FreeBreakfast,
+                                contentDescription = "Pausa",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        // Clock Out button
+                        Button(
+                            onClick = onClockOut,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E8C))
+                        ) {
+                            Icon(
+                                Icons.Outlined.StopCircle,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Registar Saída",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -530,66 +740,92 @@ private fun ShiftOfferCard(onTap: () -> Unit) {
 // ── EstaSemanaSection ─────────────────────────────────────────────────────────
 @Composable
 private fun EstaSemanaSection(shifts: List<Shift>, today: LocalDate) {
-    val nowTime = LocalTime.now()
-    val upcoming = shifts
-        .filter { s ->
-            val d = LocalDate.parse(s.date.substring(0, 10))
-            d.isAfter(today) || (d == today && LocalTime.parse(s.shiftType.endTime).isAfter(nowTime))
-        }
-        .sortedBy { it.date }
-        .take(3)
+    val weekShifts = shifts.sortedBy { it.date }.take(5)
 
     Column(modifier = Modifier.padding(horizontal = 14.dp)) {
-        if (upcoming.isEmpty()) {
-            // Mock entry matching prototype
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 6.dp)) {
-                    Text("14", color = Blue, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 28.sp)
-                    Text("Qui", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                }
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(DkSurface)
-                ) {
-                    Column(modifier = Modifier.padding(start = 17.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)) {
-                        Text("Vendas", color = Orange, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Column {
-                                Text("6:00p - 3:00a", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-                                Text("9h • 0/3", color = TxtGray, fontSize = 13.sp, modifier = Modifier.padding(top = 3.dp))
-                            }
-                            DkStatusBadge("Em Pausa", Orange, Orange.copy(alpha = 0.18f))
-                        }
-                    }
-                    Box(modifier = Modifier.width(3.5.dp).matchParentSize().background(Orange))
-                }
-            }
+        if (weekShifts.isEmpty()) {
+            Text(
+                "Sem turnos esta semana.",
+                color = TxtGray,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
         } else {
-            upcoming.forEach { shift ->
+            weekShifts.forEach { shift ->
                 val shiftDate = LocalDate.parse(shift.date.substring(0, 10))
-                val dayNum  = shiftDate.dayOfMonth.toString()
-                val dayName = shiftDate.format(DateTimeFormatter.ofPattern("EEE", Locale("pt", "PT")))
+                val dayNum   = shiftDate.dayOfMonth.toString()
+                val dayAbbr  = shiftDate.format(DateTimeFormatter.ofPattern("EEE", Locale("pt", "PT")))
                     .replaceFirstChar { it.uppercase() }.take(3)
-                val isToday = shiftDate == today
+                val isToday  = shiftDate == today
+                val isPast   = shiftDate.isBefore(today)
                 val dayColor = if (isToday) Blue else Color.White
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(bottom = 14.dp)) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 6.dp)) {
+
+                // Shift duration
+                val durationHrs = runCatching {
+                    val s = LocalTime.parse(shift.resolvedStartTime())
+                    val e = LocalTime.parse(shift.resolvedEndTime())
+                    val dur = java.time.Duration.between(s, e)
+                    if (dur.isNegative) dur.plusHours(24).toHours() else dur.toHours()
+                }.getOrDefault(0L)
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.padding(bottom = 12.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .padding(top = 6.dp)
+                            .width(36.dp)
+                    ) {
                         Text(dayNum, color = dayColor, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 24.sp)
-                        Text(dayName, color = dayColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text(dayAbbr, color = dayColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
+
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(12.dp))
                             .background(DkSurface)
-                            .padding(12.dp)
                     ) {
-                        Column {
-                            Text(shift.shiftType.name, color = Orange, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
-                            Text("${shift.shiftType.startTime} - ${shift.shiftType.endTime}", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.padding(start = 14.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    shift.resolvedName(),
+                                    color = Blue,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(bottom = 4.dp)
+                                )
+                                Text(
+                                    "${shift.resolvedStartTime()} - ${shift.resolvedEndTime()}",
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (durationHrs > 0) {
+                                    Text(
+                                        "${durationHrs}h",
+                                        color = TxtGray,
+                                        fontSize = 13.sp,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    )
+                                }
+                            }
+                            // Status badge
+                            if (isPast) {
+                                DkStatusBadge("Concluído", TxtGray, TxtGray.copy(alpha = 0.15f))
+                            } else if (isToday) {
+                                DkStatusBadge("Hoje", Blue, Blue.copy(alpha = 0.15f))
+                            }
                         }
+                        // Blue left border
+                        Box(
+                            modifier = Modifier
+                                .width(4.dp)
+                                .matchParentSize()
+                                .background(Blue)
+                        )
                     }
                 }
             }
@@ -598,7 +834,7 @@ private fun EstaSemanaSection(shifts: List<Shift>, today: LocalDate) {
             "Mostrar mais...",
             color = TxtGray,
             fontSize = 14.sp,
-            modifier = Modifier.padding(top = 16.dp)
+            modifier = Modifier.padding(top = 8.dp)
         )
     }
 }
@@ -642,7 +878,8 @@ private fun BottomNav(activeIndex: Int = 0, onSchedulerClick: () -> Unit = {}) {
             .fillMaxWidth()
             .background(DkSurface)
             .border(width = 1.dp, color = Color.White.copy(alpha = 0.07f), shape = RectangleShape)
-            .padding(top = 10.dp, bottom = 22.dp),
+            .pointerInput(Unit) {}
+            .padding(top = 8.dp, bottom = 16.dp),
         horizontalArrangement = Arrangement.SpaceAround
     ) {
         items.forEachIndexed { i, item ->
@@ -1207,7 +1444,7 @@ private fun ScreenShiftOffer(onBack: () -> Unit) {
 }
 
 @Composable
-private fun ScreenFolhasPonto(onBack: () -> Unit, onSchedulerClick: () -> Unit = {}) {
+private fun ScreenFolhasPonto(onBack: () -> Unit, onSchedulerClick: () -> Unit = {}, onNotificationsClick: () -> Unit = {}, onInboxClick: () -> Unit = {}) {
     data class Entry(val id: Int, val name: String, val duration: String, val type: String, val initials: String, val avatarColor: Color)
 
     val entries = listOf(
@@ -1360,7 +1597,12 @@ private fun ScreenFolhasPonto(onBack: () -> Unit, onSchedulerClick: () -> Unit =
             }
         }
 
-        BottomNav(onSchedulerClick = onSchedulerClick)
+        AppBottomNav(
+            active               = NavTab.HOME,
+            onSchedulerClick     = onSchedulerClick,
+            onNotificationsClick = onNotificationsClick,
+            onInboxClick         = onInboxClick
+        )
     }
 }
 
