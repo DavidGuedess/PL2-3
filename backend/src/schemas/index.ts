@@ -23,17 +23,24 @@ export const updateUserMeSchema = z.object({
 
 export const createShiftSchema = z.object({
   userId: z.coerce.number().int().positive('userId must be a positive integer'),
-  shiftTypeId: z.coerce.number().int().positive('shiftTypeId must be a positive integer'),
-  date: z.string().regex(dateRegex, 'date must be in YYYY-MM-DD format')
-})
+  shiftTypeId: z.number().int().positive().optional(),
+  date: z.string().regex(dateRegex, 'date must be in YYYY-MM-DD format'),
+  startTime: z.string().regex(timeRegex, 'startTime must be in HH:MM format').optional(),
+  endTime: z.string().regex(timeRegex, 'endTime must be in HH:MM format').optional()
+}).refine(
+  data => data.shiftTypeId !== undefined || (data.startTime !== undefined && data.endTime !== undefined),
+  { message: 'Either shiftTypeId or both startTime and endTime are required' }
+)
 
 export const updateShiftSchema = z.object({
-  shiftTypeId: z.coerce.number().int().positive().optional(),
+  shiftTypeId: z.number().int().positive().optional(),
   date: z.string().regex(dateRegex, 'date must be in YYYY-MM-DD format').optional(),
+  startTime: z.string().regex(timeRegex, 'startTime must be in HH:MM format').optional(),
+  endTime: z.string().regex(timeRegex, 'endTime must be in HH:MM format').optional(),
   published: z.boolean().optional()
 }).refine(
-  data => data.shiftTypeId !== undefined || data.date !== undefined || data.published !== undefined,
-  { message: 'shiftTypeId, date or published is required' }
+  data => data.shiftTypeId !== undefined || data.date !== undefined || data.published !== undefined || data.startTime !== undefined || data.endTime !== undefined,
+  { message: 'At least one field must be provided' }
 )
 
 export const createShiftTypeSchema = z.object({

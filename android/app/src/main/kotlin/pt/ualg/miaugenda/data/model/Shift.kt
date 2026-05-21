@@ -18,9 +18,15 @@ data class ShiftType(
 data class Shift(
     val id: Int,
     val userId: Int,
-    val shiftTypeId: Int,
+    val shiftTypeId: Int? = null,
     val date: String,
+    val startTime: String? = null,
+    val endTime: String? = null,
     val published: Boolean = false,
     val user: ShiftUser? = null,
-    val shiftType: ShiftType
+    val shiftType: ShiftType? = null
 )
+
+fun Shift.resolvedStartTime(): String = startTime ?: shiftType?.startTime ?: "00:00"
+fun Shift.resolvedEndTime(): String   = endTime   ?: shiftType?.endTime   ?: "00:00"
+fun Shift.resolvedName(): String      = shiftType?.name ?: "${resolvedStartTime()}-${resolvedEndTime()}"

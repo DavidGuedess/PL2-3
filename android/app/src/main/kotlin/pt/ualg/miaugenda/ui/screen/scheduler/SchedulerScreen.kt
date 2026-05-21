@@ -1,9 +1,12 @@
 package pt.ualg.miaugenda.ui.screen.scheduler
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,6 +26,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import pt.ualg.miaugenda.data.model.resolvedStartTime
+import pt.ualg.miaugenda.data.model.resolvedEndTime
+import pt.ualg.miaugenda.data.model.resolvedName
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -31,6 +41,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import pt.ualg.miaugenda.data.model.CreateUserRequest
+import pt.ualg.miaugenda.ui.components.AppBottomNav
+import pt.ualg.miaugenda.ui.components.NavTab
 import pt.ualg.miaugenda.data.model.Shift
 import pt.ualg.miaugenda.data.model.ShiftType
 import pt.ualg.miaugenda.data.model.User
@@ -81,11 +93,11 @@ private fun userGradient(userId: Int): Brush? {
     return if (userId % 4 == 0) AvatarGrad else null
 }
 
-private fun shiftCellColor(shiftType: ShiftType, published: Boolean): Color {
+private fun shiftCellColor(startTime: String, published: Boolean): Color {
     if (!published) return Color(0xFF2A2A2A)
     return when {
-        shiftType.startTime >= "20:00" || shiftType.startTime < "06:00" -> CellPurple
-        shiftType.startTime >= "13:00" -> CellRed
+        startTime >= "20:00" || startTime < "06:00" -> CellPurple
+        startTime >= "13:00" -> CellRed
         else -> CellBlue
     }
 }
@@ -102,7 +114,7 @@ private fun weekDays(weekStart: LocalDate): List<LocalDate> =
     (0..6).map { weekStart.plusDays(it.toLong()) }
 
 private fun dayAbbr(date: LocalDate): String {
-    val abbrs = listOf("S","T","Q","Q","S","S","D")
+    val abbrs = listOf("Seg","Ter","Qua","Qui","Sex","Sab","Dom")
     return abbrs[date.dayOfWeek.value - 1]
 }
 
@@ -122,6 +134,97 @@ private fun fullDayLabel(date: LocalDate): String {
 
 private fun dateStr(date: LocalDate): String =
     date.format(DateTimeFormatter.ISO_LOCAL_DATE)
+
+// ── Time picker wheel ─────────────────────────────────────────────────────────
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun WheelPicker(
+    values: List<String>,
+    selectedIndex: Int,
+    onIndexChange: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val itemH = 42.dp
+    val pad = 2  // items above/below center
+    // Pad with empty strings so first/last real items can appear centred
+    val padded = remember(values) { List(pad) { "" } + values + List(pad) { "" } }
+    // firstVisibleItemIndex == selectedIndex puts values[selectedIndex] in the centre slot
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
+    val snap  = rememberSnapFlingBehavior(state)
+
+    // Keep scroll position in sync when parent changes selectedIndex (e.g. initial load)
+    LaunchedEffect(selectedIndex) {
+        if (!state.isScrollInProgress) state.scrollToItem(selectedIndex)
+    }
+
+    Box(modifier = modifier.height(itemH * (pad * 2 + 1))) {
+        Box(
+            modifier = Modifier.align(Alignment.Center).fillMaxWidth().height(itemH)
+                .background(Color.White.copy(alpha = 0.09f), RoundedCornerShape(8.dp))
+        )
+        LazyColumn(state = state, flingBehavior = snap, modifier = Modifier.fillMaxSize()) {
+            items(padded.size) { i ->
+                val sel by remember { derivedStateOf { state.firstVisibleItemIndex + pad == i } }
+                Box(Modifier.fillMaxWidth().height(itemH), contentAlignment = Alignment.Center) {
+                    if (padded[i].isNotEmpty()) {
+                        Text(
+                            padded[i],
+                            color = if (sel) Color.White else TxtGray.copy(alpha = 0.35f),
+                            fontSize = if (sel) 24.sp else 17.sp,
+                            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        }
+    }
+    LaunchedEffect(state.isScrollInProgress) {
+        if (!state.isScrollInProgress) {
+            val idx = state.firstVisibleItemIndex.coerceIn(0, values.size - 1)
+            if (idx != selectedIndex) onIndexChange(idx)
+        }
+    }
+}
+
+@Composable
+private fun TimePickerRow(
+    label: String,
+    hour: Int,
+    minute: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onHourChange: (Int) -> Unit,
+    onMinuteChange: (Int) -> Unit
+) {
+    Column {
+        Row(modifier = Modifier.fillMaxWidth().clickable { onToggle() }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = Color.White, fontSize = 15.sp)
+            Text("%02d:%02d".format(hour, minute),
+                color = Blue, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (expanded) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically) {
+                WheelPicker(
+                    values = (0..23).map { "%02d".format(it) },
+                    selectedIndex = hour,
+                    onIndexChange = onHourChange,
+                    modifier = Modifier.weight(1f))
+                Text(":", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp))
+                WheelPicker(
+                    values = (0..59).map { "%02d".format(it) },
+                    selectedIndex = minute,
+                    onIndexChange = onMinuteChange,
+                    modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
 
 private fun weekRangeLabel(weekStart: LocalDate): String {
     val end = weekStart.plusDays(6)
@@ -168,16 +271,20 @@ private val STATUS_FILTERS = listOf(
 @Composable
 fun SchedulerScreen(
     onNavigateToHome: () -> Unit = {},
+    onNavigateToNotifications: () -> Unit = {},
+    onNavigateToInbox: () -> Unit = {},
     viewModel: SchedulerViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var screen by remember { mutableStateOf<SchedScreen>(SchedScreen.Grid) }
-    var successMsg by remember { mutableStateOf<String?>(null) }
+    var bannerMsg by remember { mutableStateOf<Pair<String, Boolean>?>(null) } // message, isError
     val userRole = viewModel.userRole
 
     LaunchedEffect(Unit) { viewModel.loadWeek() }
 
-    fun showSuccess(msg: String) { successMsg = msg }
+    BackHandler(enabled = screen !is SchedScreen.Grid) { screen = SchedScreen.Grid }
+
+    fun showBanner(msg: String, isError: Boolean = false) { bannerMsg = Pair(msg, isError) }
 
     // Objeto User mínimo para vista pessoal do EMPLOYEE
     val meUser = User(
@@ -217,8 +324,8 @@ fun SchedulerScreen(
                                 onUserClick   = { screen = SchedScreen.UserSchedule(it) },
                                 onPublishClick = { screen = SchedScreen.PublicarHorario },
                                 onFilterClick = { screen = SchedScreen.FiltrarHorario },
-                                onCriarFuncionario  = { screen = SchedScreen.CriarFuncionario },
-                                onAdicionarExistentes = { screen = SchedScreen.AddShift(null, viewModel.getCurrentWeek()) }
+                                onCriarFuncionario = { screen = SchedScreen.CriarFuncionario },
+                                onSuccess = { msg -> showBanner(msg) }
                             )
                         }
                     is SchedScreen.UserSchedule ->
@@ -245,11 +352,11 @@ fun SchedulerScreen(
                             onEdit    = { screen = SchedScreen.EditarTurno(s.shift) },
                             onDelete  = { shiftId ->
                                 viewModel.deleteShift(shiftId) { ok, msg ->
-                                    showSuccess(msg)
+                                    showBanner(msg, !ok)
                                     screen = SchedScreen.Grid
                                 }
                             },
-                            onPublish = { msg -> showSuccess(msg); screen = SchedScreen.Grid },
+                            onPublish = { msg -> showBanner(msg); screen = SchedScreen.Grid },
                             onPublishShift = { id, cb -> viewModel.publishShift(id, cb) }
                         )
                     is SchedScreen.AddShift ->
@@ -258,9 +365,9 @@ fun SchedulerScreen(
                             date       = s.date,
                             uiState    = uiState,
                             onBack     = { screen = SchedScreen.Grid },
-                            onSuccess  = { userId, shiftTypeId, dateStr ->
-                                viewModel.createShift(userId, shiftTypeId, dateStr) { ok, msg ->
-                                    showSuccess(msg)
+                            onSuccess  = { userId, startTime, endTime, dateStr ->
+                                viewModel.createShift(userId, dateStr, startTime, endTime) { ok, msg ->
+                                    showBanner(msg, !ok)
                                     if (ok) screen = SchedScreen.Grid
                                 }
                             }
@@ -270,9 +377,9 @@ fun SchedulerScreen(
                             shift     = s.shift,
                             uiState   = uiState,
                             onBack    = { screen = SchedScreen.ShiftDetail(s.shift) },
-                            onSuccess = { shiftTypeId, dateStr ->
-                                viewModel.updateShift(s.shift.id, shiftTypeId, dateStr) { ok, msg ->
-                                    showSuccess(msg)
+                            onSuccess = { startTime, endTime, dateStr ->
+                                viewModel.updateShift(s.shift.id, dateStr, startTime, endTime) { ok, msg ->
+                                    showBanner(msg, !ok)
                                     if (ok) screen = SchedScreen.Grid
                                 }
                             }
@@ -281,14 +388,14 @@ fun SchedulerScreen(
                         PublicarHorarioScreen(
                             uiState  = uiState,
                             onBack   = { screen = SchedScreen.Grid },
-                            onSuccess = { msg -> showSuccess(msg); screen = SchedScreen.Grid },
+                            onSuccess = { msg -> showBanner(msg); screen = SchedScreen.Grid },
                             onPublishMultiple = { ids, cb -> viewModel.publishMultipleShifts(ids, cb) }
                         )
                     is SchedScreen.FiltrarHorario ->
                         FilterScreen(
                             onBack          = { screen = SchedScreen.Grid },
                             onPositionClick = { screen = SchedScreen.FiltrarPosicao },
-                            onSuccess       = { showSuccess("Filtros aplicados"); screen = SchedScreen.Grid }
+                            onSuccess       = { showBanner("Filtros aplicados"); screen = SchedScreen.Grid }
                         )
                     is SchedScreen.FiltrarPosicao ->
                         PositionFilterScreen(
@@ -298,34 +405,43 @@ fun SchedulerScreen(
                     is SchedScreen.CriarFuncionario ->
                         CriarFuncionarioScreen(
                             onBack = { screen = SchedScreen.Grid },
-                            onCreateUser = { req -> viewModel.createUser(req) { ok, msg ->
-                                showSuccess(msg)
-                                if (ok) screen = SchedScreen.Grid
+                            onCreateUser = { req, onResult -> viewModel.createUser(req) { ok, msg ->
+                                if (ok) { showBanner(msg); screen = SchedScreen.Grid }
+                                else onResult(false, msg)
                             }}
                         )
                 }
             }
             if (screen is SchedScreen.Grid) {
-                SchedBottomNav(onHomeClick = onNavigateToHome)
+                AppBottomNav(
+                    active               = NavTab.SCHEDULER,
+                    onHomeClick          = onNavigateToHome,
+                    onNotificationsClick = onNavigateToNotifications,
+                    onInboxClick         = onNavigateToInbox
+                )
             }
         }
 
-        // Banner de sucesso
-        successMsg?.let { msg ->
-            LaunchedEffect(msg) { delay(3000); successMsg = null }
+        // Banner de feedback (verde = sucesso, vermelho = erro; swipe para cima para fechar)
+        bannerMsg?.let { (msg, isError) ->
+            LaunchedEffect(msg) { delay(3500); bannerMsg = null }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopCenter)
                     .padding(top = 8.dp, start = 16.dp, end = 16.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(if (msg.startsWith("Erro") || msg.startsWith("Sem") || msg.startsWith("Conflito")) RedBadge else DkGreen)
+                    .background(if (isError) RedBadge else DkGreen)
+                    .pointerInput(msg) {
+                        detectVerticalDragGestures { _, dragAmount ->
+                            if (dragAmount < -20f) bannerMsg = null
+                        }
+                    }
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        if (msg.startsWith("Erro") || msg.startsWith("Sem") || msg.startsWith("Conflito"))
-                            Icons.Filled.Error else Icons.Filled.CheckCircle,
+                        if (isError) Icons.Filled.Error else Icons.Filled.CheckCircle,
                         null, tint = Color.White, modifier = Modifier.size(20.dp)
                     )
                     Text(msg, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -348,12 +464,36 @@ private fun SchedulerGrid(
     onPublishClick: () -> Unit,
     onFilterClick: () -> Unit,
     onCriarFuncionario: () -> Unit,
-    onAdicionarExistentes: () -> Unit
+    onSuccess: (String) -> Unit = {}
 ) {
     val weekStart = viewModel.getCurrentWeek()
     val days = weekDays(weekStart)
     var showAddMenu by remember { mutableStateOf(false) }
+    var showSelectUser by remember { mutableStateOf(false) }
+    var showOptionsMenu by remember { mutableStateOf(false) }
+    var showCopyShifts by remember { mutableStateOf(false) }
+    var targetWeekForCopy by remember { mutableStateOf(weekStart.plusWeeks(1)) }
+    var showCopyConfirm by remember { mutableStateOf(false) }
     var swipeDelta by remember { mutableStateOf(0f) }
+    var selectedShiftIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    val isSelectMode = selectedShiftIds.isNotEmpty()
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var userMenuTarget by remember { mutableStateOf<User?>(null) }
+
+    // Utilizadores visíveis na grelha: derivados do backend (weekAssignments + turnos sem assignment)
+    val displayedUserIds = (
+        uiState.weekAssignments.map { it.userId } +
+        uiState.shifts.map { it.userId }
+    ).toSet()
+    val weekStr = viewModel.getCurrentWeek().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+    val draftCount = uiState.shifts.count { !it.published }
+    // Ordenar pela ordem de inserção do weekAssignment (id crescente = quem entrou primeiro)
+    val assignmentOrder = uiState.weekAssignments.sortedBy { it.id }.map { it.userId }
+    val displayedUsers = (
+        assignmentOrder.mapNotNull { uid -> uiState.users.find { it.id == uid } } +
+        uiState.users.filter { it.id in displayedUserIds && it.id !in assignmentOrder }
+    ).distinctBy { it.id }
+    val availableUsers = uiState.users.filter { it.id !in displayedUserIds }
 
     Box(
         modifier = Modifier.fillMaxSize().pointerInput(Unit) {
@@ -391,7 +531,7 @@ private fun SchedulerGrid(
                         modifier = Modifier.size(22.dp).clickable { onFilterClick() })
                     Box(
                         modifier = Modifier.size(34.dp).clip(CircleShape).background(DkSurface2)
-                            .clickable { showAddMenu = true },
+                            .clickable { showOptionsMenu = true },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Outlined.MoreHoriz, null, tint = Color.White, modifier = Modifier.size(22.dp))
@@ -419,8 +559,8 @@ private fun SchedulerGrid(
             Row(modifier = Modifier.fillMaxWidth().border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(0.dp))) {
                 Box(modifier = Modifier.width(56.dp).padding(6.dp)) {
                     Column {
-                        Text(monthLabel(weekStart), color = TxtGray, fontSize = 11.sp)
-                        Text(yearLabel(weekStart), color = TxtGray, fontSize = 11.sp)
+                        Text(monthLabel(weekStart), color = TxtGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text(yearLabel(weekStart), color = TxtGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 days.forEach { date ->
@@ -429,8 +569,8 @@ private fun SchedulerGrid(
                             .padding(vertical = 4.dp, horizontal = 2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(dayAbbr(date), color = TxtGray, fontSize = 10.sp)
-                        Text(dayNum(date), color = Color.White, fontSize = 13.sp)
+                        Text(dayAbbr(date), color = TxtGray, fontSize = 9.sp)
+                        Text(dayNum(date), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -452,29 +592,25 @@ private fun SchedulerGrid(
                     }
                 }
             } else {
-                val draftCount = uiState.shifts.count { !it.published }
-
                 LazyColumn(modifier = Modifier.weight(1f)) {
                     // Linhas de funcionários
-                    items(uiState.users) { user ->
+                    items(displayedUsers) { user ->
                         val userShifts = uiState.shifts.filter { it.userId == user.id }
                         val maxPerDay = days.maxOfOrNull { day ->
                             userShifts.count { it.date.startsWith(dateStr(day)) }
                         }?.coerceAtLeast(1) ?: 1
                         val rowH = (70 * maxPerDay).dp
                         val lineClr = Color.White.copy(alpha = 0.10f)
-                        val totalHours = userShifts.sumOf {
-                            calcDuration(it.shiftType.startTime, it.shiftType.endTime)
-                                .replace("h", "").replace("m", "").trim()
-                                .let { s -> val p = s.split(" "); (p.getOrNull(0)?.toIntOrNull() ?: 0) }
-                        }
+                        val totalHours = userShifts
+                            .filter { it.published }
+                            .sumOf { calcDurationHours(it.resolvedStartTime(), it.resolvedEndTime()) }
                         Row(
                             modifier = Modifier.fillMaxWidth().height(rowH)
                                 .border(1.dp, lineClr, RoundedCornerShape(0.dp))
                         ) {
                             Column(
                                 modifier = Modifier.width(56.dp).fillMaxHeight().padding(4.dp)
-                                    .clickable { onUserClick(user) },
+                                    .clickable { userMenuTarget = user },
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center
                             ) {
@@ -487,36 +623,93 @@ private fun SchedulerGrid(
                                 Box(modifier = Modifier.width(1.dp).fillMaxHeight().background(lineClr))
                                 val dayShifts = userShifts.filter { it.date.startsWith(dateStr(day)) }
                                 Box(modifier = Modifier.weight(1f).fillMaxHeight().padding(2.dp)) {
-                                    if (dayShifts.isNotEmpty()) {
-                                        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            dayShifts.forEach { shift ->
-                                                Box(modifier = Modifier.weight(1f)) {
-                                                    ShiftCell(shift = shift, onClick = { onShiftClick(shift) })
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        // Zona de turnos (ocupa o espaço disponível)
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxWidth()
+                                                .let {
+                                                    if (dayShifts.isEmpty() && !isSelectMode)
+                                                        it.clickable { onEmptyClick(user, day) }
+                                                    else it
+                                                }
+                                        ) {
+                                            if (dayShifts.isNotEmpty()) {
+                                                Column(
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                                ) {
+                                                    dayShifts.forEach { shift ->
+                                                        Box(modifier = Modifier.weight(1f)) {
+                                                            ShiftCell(
+                                                                shift = shift,
+                                                                isSelected = shift.id in selectedShiftIds,
+                                                                isSelectMode = isSelectMode,
+                                                                onLongClick = { selectedShiftIds = selectedShiftIds + shift.id },
+                                                                onClick = {
+                                                                    if (isSelectMode) {
+                                                                        selectedShiftIds = if (shift.id in selectedShiftIds)
+                                                                            selectedShiftIds - shift.id
+                                                                        else
+                                                                            selectedShiftIds + shift.id
+                                                                    } else {
+                                                                        onShiftClick(shift)
+                                                                    }
+                                                                }
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
-                                    } else {
-                                        Box(modifier = Modifier.fillMaxSize().clickable { onEmptyClick(user, day) })
+                                        // Zona "..." para adicionar turno — sempre visível fora do modo seleção
+                                        if (!isSelectMode) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(22.dp)
+                                                    .clickable { onEmptyClick(user, day) },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    "···",
+                                                    color = TxtGray.copy(alpha = 0.45f),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
 
-                    // Linha adicionar funcionário
-                    item {
+                    // Linha vazia extra para facilitar adição de novos funcionários
+                    val emptyCount = 1
+                    items(emptyCount) { idx ->
+                        val lineClr2 = Color.White.copy(alpha = 0.10f)
                         Row(
-                            modifier = Modifier.fillMaxWidth().height(50.dp)
-                                .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(0.dp)),
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier.fillMaxWidth().height(70.dp)
+                                .border(1.dp, lineClr2, RoundedCornerShape(0.dp))
                         ) {
-                            Box(
-                                modifier = Modifier.width(56.dp).clickable { showAddMenu = true }.padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
+                            // Coluna esquerda: ícone de adicionar só na primeira linha vazia
+                            Column(
+                                modifier = Modifier.width(56.dp).fillMaxHeight().padding(4.dp)
+                                    .let { m -> if (idx == 0) m.clickable { showAddMenu = true } else m },
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
                             ) {
-                                Icon(Icons.Outlined.PersonAdd, null, tint = TxtGray, modifier = Modifier.size(28.dp))
+                                if (idx == 0) {
+                                    Icon(Icons.Outlined.PersonAdd, null, tint = Blue, modifier = Modifier.size(22.dp))
+                                }
                             }
-                            Spacer(Modifier.weight(1f))
+                            // Células dos dias (vazias)
+                            days.forEach { _ ->
+                                Box(modifier = Modifier.width(1.dp).fillMaxHeight().background(lineClr2))
+                                Box(modifier = Modifier.weight(1f).fillMaxHeight())
+                            }
                         }
                     }
 
@@ -526,11 +719,15 @@ private fun SchedulerGrid(
                             .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(0.dp))
                             .padding(vertical = 6.dp)) {
                             Box(modifier = Modifier.width(56.dp), contentAlignment = Alignment.Center) {
-                                val total = uiState.shifts.size * 8
+                                val total = uiState.shifts
+                                    .filter { it.published }
+                                    .sumOf { calcDurationHours(it.resolvedStartTime(), it.resolvedEndTime()) }
                                 Text("${total}h", color = TxtGray, fontSize = 10.sp)
                             }
                             days.forEach { day ->
-                                val dayTotal = uiState.shifts.count { it.date.startsWith(dateStr(day)) } * 8
+                                val dayTotal = uiState.shifts
+                                    .filter { it.published && it.date.startsWith(dateStr(day)) }
+                                    .sumOf { calcDurationHours(it.resolvedStartTime(), it.resolvedEndTime()) }
                                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                                     Text(if (dayTotal > 0) "${dayTotal}h" else "0h", color = TxtGray, fontSize = 10.sp)
                                 }
@@ -538,24 +735,140 @@ private fun SchedulerGrid(
                         }
                     }
 
-                    // Banner publicar (se houver turnos)
-                    if (draftCount > 0) {
-                        item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().background(DkSurface2)
-                                    .clickable { onPublishClick() }
-                                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Icon(Icons.Outlined.CheckCircle, null, tint = Blue, modifier = Modifier.size(18.dp))
-                                    Text("Publicar $draftCount turnos rascunho",
-                                        color = Blue, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                                }
-                                Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(20.dp))
-                            }
+                }
+            }
+        }
+
+        // Banner flutuante: publicar rascunhos
+        if (draftCount > 0 && !isSelectMode) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(DkSurface2)
+                    .clickable { onPublishClick() }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Outlined.CheckCircle, null, tint = Blue, modifier = Modifier.size(18.dp))
+                Text("Publicar $draftCount turnos rascunho",
+                    color = Blue, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(18.dp))
+            }
+        }
+
+        // Barra de seleção múltipla
+        if (isSelectMode) {
+            Box(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .background(DkSurface2).padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = { selectedShiftIds = emptySet() }) {
+                        Text("Cancelar", color = TxtGray, fontSize = 14.sp)
+                    }
+                    Text(
+                        "${selectedShiftIds.size} selecionado${if (selectedShiftIds.size != 1) "s" else ""}",
+                        color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold
+                    )
+                    Button(
+                        onClick = { showDeleteConfirm = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = RedBadge),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Outlined.Delete, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Eliminar", color = Color.White, fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+
+        // Diálogo confirmar eliminação múltipla
+        if (showDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                containerColor = DkSurface,
+                title = {
+                    Text(
+                        "Eliminar ${selectedShiftIds.size} turno${if (selectedShiftIds.size != 1) "s" else ""}?",
+                        color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp
+                    )
+                },
+                text = { Text("Esta ação não pode ser desfeita.", color = TxtGray, fontSize = 14.sp) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val ids = selectedShiftIds.toList()
+                        ids.forEach { id -> viewModel.deleteShift(id) { _, _ -> } }
+                        selectedShiftIds = emptySet()
+                        showDeleteConfirm = false
+                    }) {
+                        Text("ELIMINAR", color = RedBadge, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) {
+                        Text("CANCELAR", color = TxtGray)
+                    }
+                }
+            )
+        }
+
+        // Menu do utilizador
+        if (userMenuTarget != null) {
+            val target = userMenuTarget!!
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f))
+                    .clickable { userMenuTarget = null },
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                        .background(DkSurface).clickable {}
+                        .padding(horizontal = 20.dp, vertical = 24.dp).padding(bottom = 16.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(bottom = 20.dp)
+                    ) {
+                        SchedAvatar(userInitials(target.name), userColor(target.id), userGradient(target.id), 40)
+                        Column {
+                            Text(target.name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text(categoryLabel(target.category), color = TxtGray, fontSize = 13.sp)
                         }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp)
+                            .clickable { userMenuTarget = null; onUserClick(target) },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(Icons.Outlined.CalendarMonth, null, tint = TxtGray, modifier = Modifier.size(24.dp))
+                        Text("Ver horario", color = Color.White, fontSize = 16.sp)
+                    }
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp)
+                            .clickable {
+                                val assignment = uiState.weekAssignments.find { it.userId == target.id }
+                                userMenuTarget = null
+                                if (assignment != null) {
+                                    viewModel.removeUserFromWeek(assignment.id) { }
+                                }
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(Icons.Outlined.PersonRemove, null, tint = RedBadge, modifier = Modifier.size(24.dp))
+                        Text("Remover da grelha", color = RedBadge, fontSize = 16.sp)
                     }
                 }
             }
@@ -572,14 +885,14 @@ private fun SchedulerGrid(
                     modifier = Modifier.fillMaxWidth()
                         .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                         .background(DkSurface).clickable {}
-                        .padding(horizontal = 20.dp, vertical = 24.dp).padding(bottom = 16.dp)
+                        .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
                 ) {
                     Text("Adicionar funcionarios ao horario Padrao",
-                        color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 24.dp))
+                        color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 16.dp))
                     if (userRole == "ADMIN") {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp).clickable { showAddMenu = false; onCriarFuncionario() },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).clickable { showAddMenu = false; onCriarFuncionario() },
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
@@ -589,7 +902,7 @@ private fun SchedulerGrid(
                         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
                     }
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp).clickable { showAddMenu = false; onAdicionarExistentes() },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).clickable { showAddMenu = false; showSelectUser = true },
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -599,26 +912,224 @@ private fun SchedulerGrid(
                 }
             }
         }
+
+        // Overlay seleção de funcionário existente
+        if (showSelectUser) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f))
+                    .clickable { showSelectUser = false },
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                        .background(DkSurface).clickable {}
+                        .padding(horizontal = 20.dp, vertical = 24.dp)
+                        .heightIn(max = 480.dp)
+                ) {
+                    Text(
+                        "Selecionar funcionario",
+                        color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    if (availableUsers.isEmpty()) {
+                        Text(
+                            "Todos os funcionarios ja estao na grelha.",
+                            color = TxtGray, fontSize = 14.sp,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    } else {
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            items(availableUsers) { user ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            showSelectUser = false
+                                            viewModel.addUserToWeek(user.id, weekStr) { }
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    SchedAvatar(userInitials(user.name), userColor(user.id), userGradient(user.id), 38)
+                                    Column {
+                                        Text(user.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(categoryLabel(user.category), color = TxtGray, fontSize = 12.sp)
+                                    }
+                                }
+                                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.06f)))
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+        }
+
+        // ── Menu de opções (três pontos) ───────────────────────────────────────
+        if (showOptionsMenu) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f))
+                    .clickable { showOptionsMenu = false },
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                        .background(DkSurface).clickable {}
+                        .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
+                ) {
+                    Text("Opcoes", color = Color.White, fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                            .clickable { /* Export - nao implementado */ showOptionsMenu = false },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(Icons.Outlined.FileDownload, null, tint = TxtGray, modifier = Modifier.size(24.dp))
+                        Text("Export Schedule", color = TxtGray, fontSize = 16.sp)
+                    }
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                            .clickable {
+                                showOptionsMenu = false
+                                targetWeekForCopy = weekStart.plusWeeks(1)
+                                showCopyShifts = true
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(Icons.Outlined.ContentCopy, null, tint = Color.White, modifier = Modifier.size(24.dp))
+                        Text("Copy Shifts", color = Color.White, fontSize = 16.sp)
+                    }
+                }
+            }
+        }
+
+        // ── Copy Shifts — seletor de semana destino ────────────────────────────
+        if (showCopyShifts) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f))
+                    .clickable { showCopyShifts = false },
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                        .background(DkSurface).clickable {}
+                        .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 16.dp)
+                ) {
+                    Text("Copiar turnos para", color = Color.White, fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
+                    Text("Semana de origem: ${weekRangeLabel(weekStart)}", color = TxtGray, fontSize = 13.sp,
+                        modifier = Modifier.padding(bottom = 20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DkSurface2)
+                            .padding(horizontal = 12.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.ChevronLeft, null, tint = Blue,
+                            modifier = Modifier.size(28.dp).clickable {
+                                targetWeekForCopy = targetWeekForCopy.minusWeeks(1)
+                            })
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Semana destino", color = TxtGray, fontSize = 11.sp)
+                            Text(weekRangeLabel(targetWeekForCopy), color = Color.White,
+                                fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Icon(Icons.Filled.ChevronRight, null, tint = Blue,
+                            modifier = Modifier.size(28.dp).clickable {
+                                targetWeekForCopy = targetWeekForCopy.plusWeeks(1)
+                            })
+                    }
+                    Spacer(Modifier.height(20.dp))
+                    Button(
+                        onClick = { showCopyShifts = false; showCopyConfirm = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Blue),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Continuar", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+
+        // ── Copy Shifts — confirmação ──────────────────────────────────────────
+        if (showCopyConfirm) {
+            AlertDialog(
+                onDismissRequest = { showCopyConfirm = false },
+                containerColor = DkSurface,
+                title = {
+                    Text("Copiar semana", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                },
+                text = {
+                    Text(
+                        "Copiar todos os turnos de\n${weekRangeLabel(weekStart)}\npara\n${weekRangeLabel(targetWeekForCopy)}?",
+                        color = TxtGray, fontSize = 14.sp
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showCopyConfirm = false
+                        viewModel.copyWeek(targetWeekForCopy) { ok, msg -> onSuccess(msg) }
+                    }) {
+                        Text("Copiar", color = Blue, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCopyConfirm = false }) {
+                        Text("Cancelar", color = TxtGray)
+                    }
+                }
+            )
+        }
     }
 }
 
 // ── Célula de turno ───────────────────────────────────────────────────────────
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ShiftCell(shift: Shift, onClick: () -> Unit) {
-    val cellColor = shiftCellColor(shift.shiftType, shift.published)
+private fun ShiftCell(
+    shift: Shift,
+    isSelected: Boolean = false,
+    isSelectMode: Boolean = false,
+    onLongClick: () -> Unit = {},
+    onClick: () -> Unit
+) {
+    val cellColor = shiftCellColor(shift.resolvedStartTime(), shift.published)
     val textAlpha = if (shift.published) 1f else 0.55f
     Box(
         modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp))
-            .background(cellColor).clickable { onClick() }.padding(5.dp)
+            .background(if (isSelected) Blue.copy(alpha = 0.35f) else cellColor)
+            .border(if (isSelected) 2.dp else 0.dp, if (isSelected) Blue else Color.Transparent, RoundedCornerShape(6.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(5.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(
-                "${shift.shiftType.startTime}\n${shift.shiftType.endTime}",
+                "${shift.resolvedStartTime()}\n${shift.resolvedEndTime()}",
                 color = Color.White.copy(alpha = textAlpha), fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
                 lineHeight = 13.sp, modifier = Modifier.padding(bottom = 2.dp)
             )
         }
-        if (!shift.published) {
+        if (isSelected) {
+            Icon(
+                Icons.Filled.CheckCircle, null,
+                tint = Color.White,
+                modifier = Modifier.size(12.dp).align(Alignment.BottomEnd)
+            )
+        } else if (!shift.published) {
             Icon(
                 Icons.Outlined.Lock, null,
                 tint = Color.White.copy(alpha = 0.4f),
@@ -652,7 +1163,7 @@ private fun DayDetailScreen(
     val dayShifts = uiState.shifts.filter { it.date.startsWith(dateStr(date)) }
     val uniqueUsers = dayShifts.map { it.userId }.distinct().size
     val totalH = dayShifts.sumOf {
-        calcDuration(it.shiftType.startTime, it.shiftType.endTime)
+        calcDuration(it.resolvedStartTime(), it.resolvedEndTime())
             .let { s -> val p = s.replace("h", "").replace("m","").trim().split(" ")
                 (p.getOrNull(0)?.toIntOrNull() ?: 0) }
     }
@@ -708,9 +1219,9 @@ private fun DayDetailScreen(
                             44
                         )
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(shift.shiftType.name, color = Blue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(shift.resolvedName(), color = Blue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             Text(user?.name ?: "Desconhecido", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text("${shift.shiftType.startTime} - ${shift.shiftType.endTime}", color = TxtGray, fontSize = 13.sp)
+                            Text("${shift.resolvedStartTime()} - ${shift.resolvedEndTime()}", color = TxtGray, fontSize = 13.sp)
                         }
                         Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(18.dp))
                     }
@@ -778,9 +1289,9 @@ private fun ShiftDetailScreen(
                         Icon(Icons.Outlined.DateRange, null, tint = TxtGray, modifier = Modifier.size(22.dp))
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text(shift.shiftType.startTime, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                                Text(shift.resolvedStartTime(), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
                                 Icon(Icons.Outlined.ArrowForward, null, tint = TxtGray, modifier = Modifier.size(20.dp))
-                                Text(shift.shiftType.endTime, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                                Text(shift.resolvedEndTime(), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
                             }
                             Text(shift.date, color = TxtGray, fontSize = 14.sp)
                         }
@@ -789,9 +1300,9 @@ private fun ShiftDetailScreen(
                 }
                 item {
                     listOf(
-                        Triple("Tipo de turno",   shift.shiftType.name, null),
+                        Triple("Tipo de turno",   shift.resolvedName(), null),
                         Triple("Pausa nao paga",  "Nenhuma",            null),
-                        Triple("Total",           calcDuration(shift.shiftType.startTime, shift.shiftType.endTime), null),
+                        Triple("Total",           calcDuration(shift.resolvedStartTime(), shift.resolvedEndTime()), null),
                     ).forEach { (label, value, dot) ->
                         Row(modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -941,12 +1452,11 @@ private fun ShiftDetailScreen(
                     .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                     .background(DkSurface).clickable {}
                     .padding(horizontal = 20.dp, vertical = 24.dp).padding(bottom = 20.dp)) {
-                    Text("Como notificar a equipa?", color = Color.White, fontSize = 18.sp,
+                    Text("Publicar turno", color = Color.White, fontSize = 18.sp,
                         fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
                     listOf(
-                        "Notificar e confirmar selecionados" to Icons.Outlined.NotificationsActive,
-                        "Notificar selecionados"             to Icons.Outlined.Notifications,
-                        "Nao notificar selecionados"         to Icons.Outlined.NotificationsOff,
+                        "Notificar funcionario" to Icons.Outlined.Notifications,
+                        "Nao notificar"         to Icons.Outlined.NotificationsOff,
                     ).forEach { (option, icon) ->
                         Row(
                             modifier = Modifier.fillMaxWidth()
@@ -975,25 +1485,28 @@ private fun EditarTurnoScreen(
     shift: Shift,
     uiState: SchedulerUiState,
     onBack: () -> Unit,
-    onSuccess: (Int?, String?) -> Unit
+    onSuccess: (String, String, String?) -> Unit
 ) {
-    var selectedShiftTypeId by remember { mutableStateOf(shift.shiftTypeId) }
-    var breakMin  by remember { mutableStateOf(0) }
-    var showBreakPicker by remember { mutableStateOf(false) }
-    var showShiftTypePicker by remember { mutableStateOf(false) }
+    val initStart = shift.resolvedStartTime()
+    val initEnd   = shift.resolvedEndTime()
+    var startHour   by remember { mutableStateOf(initStart.split(":")[0].toIntOrNull() ?: 8) }
+    var startMinute by remember { mutableStateOf(initStart.split(":").getOrNull(1)?.toIntOrNull() ?: 0) }
+    var endHour     by remember { mutableStateOf(initEnd.split(":")[0].toIntOrNull() ?: 20) }
+    var endMinute   by remember { mutableStateOf(initEnd.split(":").getOrNull(1)?.toIntOrNull() ?: 0) }
+    var startExpanded by remember { mutableStateOf(false) }
+    var endExpanded   by remember { mutableStateOf(false) }
 
-    val selectedType = uiState.shiftTypes.find { it.id == selectedShiftTypeId } ?: shift.shiftType
-    val duration = calcDuration(selectedType.startTime, selectedType.endTime, breakMin)
     val user = uiState.users.find { it.id == shift.userId }
-
-    if (showBreakPicker) BreakPickerDialog(breakMin, onDismiss = { showBreakPicker = false }) { breakMin = it; showBreakPicker = false }
+    val startStr = "%02d:%02d".format(startHour, startMinute)
+    val endStr   = "%02d:%02d".format(endHour, endMinute)
+    val duration = calcDuration(startStr, endStr)
 
     Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).padding(bottom = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("Cancelar", color = Blue, fontSize = 16.sp) }
             Text("Editar Turno", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-            TextButton(onClick = { onSuccess(selectedShiftTypeId, null) }) {
+            TextButton(onClick = { onSuccess(startStr, endStr, null) }) {
                 Text("Guardar", color = Blue, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
@@ -1008,23 +1521,29 @@ private fun EditarTurnoScreen(
                             Text(user?.name ?: "Desconhecido", color = TxtGray, fontSize = 15.sp)
                         }
                     }
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                    Row(modifier = Modifier.fillMaxWidth().clickable { showShiftTypePicker = true }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Tipo de turno", color = Color.White, fontSize = 15.sp)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(selectedType.name, color = Blue, fontSize = 15.sp)
-                            Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(16.dp))
-                        }
-                    }
                 }
             }
             item {
                 FormCard(modifier = Modifier.padding(bottom = 16.dp)) {
-                    FormRow("Hora de inicio", selectedType.startTime)
+                    FormRow("Data", shift.date.take(10))
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                    FormRow("Hora de fim", selectedType.endTime)
+                    TimePickerRow(
+                        label = "Hora de inicio",
+                        hour = startHour, minute = startMinute,
+                        expanded = startExpanded,
+                        onToggle = { startExpanded = !startExpanded; if (startExpanded) endExpanded = false },
+                        onHourChange = { startHour = it },
+                        onMinuteChange = { startMinute = it }
+                    )
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+                    TimePickerRow(
+                        label = "Hora de fim",
+                        hour = endHour, minute = endMinute,
+                        expanded = endExpanded,
+                        onToggle = { endExpanded = !endExpanded; if (endExpanded) startExpanded = false },
+                        onHourChange = { endHour = it },
+                        onMinuteChange = { endMinute = it }
+                    )
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
                     Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), contentAlignment = Alignment.CenterEnd) {
                         Box(modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(DkSurface2).padding(horizontal = 14.dp, vertical = 6.dp)) {
@@ -1033,45 +1552,7 @@ private fun EditarTurnoScreen(
                     }
                 }
             }
-            item {
-                FormCard(modifier = Modifier.padding(bottom = 16.dp)) {
-                    FormRowClickable("Pausa nao paga", if (breakMin == 0) "Nenhuma" else "${breakMin}min") { showBreakPicker = true }
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                    FormRow("Local de trabalho", "Nenhum")
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                    FormRow("Repetir", "Nunca")
-                }
-            }
             item { Spacer(Modifier.height(20.dp)) }
-        }
-    }
-
-    // Picker de tipo de turno
-    if (showShiftTypePicker) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f))
-            .clickable { showShiftTypePicker = false }, contentAlignment = Alignment.BottomCenter) {
-            Column(modifier = Modifier.fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                .background(DkSurface).clickable {}
-                .padding(horizontal = 20.dp, vertical = 24.dp).padding(bottom = 20.dp)) {
-                Text("Selecionar tipo de turno", color = Color.White, fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp))
-                uiState.shiftTypes.forEach { st ->
-                    Row(modifier = Modifier.fillMaxWidth()
-                        .clickable { selectedShiftTypeId = st.id; showShiftTypePicker = false }
-                        .padding(vertical = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text(st.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text("${st.startTime} - ${st.endTime}", color = TxtGray, fontSize = 13.sp)
-                        }
-                        if (selectedShiftTypeId == st.id)
-                            Icon(Icons.Filled.Check, null, tint = Blue, modifier = Modifier.size(20.dp))
-                    }
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                }
-            }
         }
     }
 }
@@ -1099,13 +1580,12 @@ private fun PublicarHorarioScreen(
         }
         LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
             item {
-                Text("COMO NOTIFICAR A EQUIPA?", color = TxtGray, fontSize = 12.sp,
+                Text("NOTIFICACAO", color = TxtGray, fontSize = 12.sp,
                     fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp, modifier = Modifier.padding(bottom = 10.dp))
                 Column(modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(DkSurface)) {
                     listOf(
-                        "Notificar e confirmar selecionados",
-                        "Notificar selecionados",
-                        "Nao notificar selecionados"
+                        "Notificar funcionarios",
+                        "Nao notificar"
                     ).forEachIndexed { i, opt ->
                         Row(modifier = Modifier.fillMaxWidth().clickable { notifyOption = i }
                             .padding(horizontal = 16.dp, vertical = 14.dp),
@@ -1155,7 +1635,7 @@ private fun PublicarHorarioScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(shift.date, color = TxtGray, fontSize = 12.sp)
                         Text(user?.name ?: "Desconhecido", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        Text("${shift.shiftType.startTime} - ${shift.shiftType.endTime} • ${shift.shiftType.name}", color = TxtGray, fontSize = 12.sp)
+                        Text("${shift.resolvedStartTime()} - ${shift.resolvedEndTime()} • ${shift.resolvedName()}", color = TxtGray, fontSize = 12.sp)
                     }
                 }
                 if (i < drafts.lastIndex) Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.07f)))
@@ -1191,19 +1671,20 @@ private fun AddShiftScreen(
     date: LocalDate,
     uiState: SchedulerUiState,
     onBack: () -> Unit,
-    onSuccess: (Int, Int, String) -> Unit
+    onSuccess: (Int, String, String, String) -> Unit
 ) {
-    var selectedUser by remember { mutableStateOf(user) }
-    var selectedShiftTypeId by remember { mutableStateOf(uiState.shiftTypes.firstOrNull()?.id) }
-    var showUserPicker by remember { mutableStateOf(false) }
-    var showShiftTypePicker by remember { mutableStateOf(false) }
-    var breakMin by remember { mutableStateOf(0) }
-    var showBreakPicker by remember { mutableStateOf(false) }
+    var selectedUser    by remember { mutableStateOf(user) }
+    var showUserPicker  by remember { mutableStateOf(false) }
+    var startHour       by remember { mutableStateOf(8) }
+    var startMinute     by remember { mutableStateOf(0) }
+    var endHour         by remember { mutableStateOf(20) }
+    var endMinute       by remember { mutableStateOf(0) }
+    var startExpanded   by remember { mutableStateOf(false) }
+    var endExpanded     by remember { mutableStateOf(false) }
 
-    val selectedType = uiState.shiftTypes.find { it.id == selectedShiftTypeId }
-    val duration = if (selectedType != null) calcDuration(selectedType.startTime, selectedType.endTime, breakMin) else "—"
-
-    if (showBreakPicker) BreakPickerDialog(breakMin, onDismiss = { showBreakPicker = false }) { breakMin = it; showBreakPicker = false }
+    val startStr = "%02d:%02d".format(startHour, startMinute)
+    val endStr   = "%02d:%02d".format(endHour, endMinute)
+    val duration = calcDuration(startStr, endStr)
 
     Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).padding(bottom = 16.dp),
@@ -1213,12 +1694,11 @@ private fun AddShiftScreen(
             TextButton(
                 onClick = {
                     val uid = selectedUser?.id
-                    val stid = selectedShiftTypeId
-                    if (uid != null && stid != null) onSuccess(uid, stid, dateStr(date))
+                    if (uid != null) onSuccess(uid, startStr, endStr, dateStr(date))
                 },
-                enabled = selectedUser != null && selectedShiftTypeId != null
+                enabled = selectedUser != null
             ) {
-                Text("Adicionar", color = if (selectedUser != null && selectedShiftTypeId != null) Blue else TxtGray,
+                Text("Adicionar", color = if (selectedUser != null) Blue else TxtGray,
                     fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
@@ -1239,38 +1719,35 @@ private fun AddShiftScreen(
                             Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(16.dp))
                         }
                     }
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                    Row(modifier = Modifier.fillMaxWidth().clickable { showShiftTypePicker = true }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Tipo de turno", color = Color.White, fontSize = 15.sp)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(selectedType?.name ?: "Selecionar...", color = if (selectedType != null) Blue else TxtGray, fontSize = 15.sp)
-                            Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(16.dp))
-                        }
-                    }
                 }
             }
             item {
                 FormCard(modifier = Modifier.padding(bottom = 16.dp)) {
                     FormRow("Data", dateStr(date))
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                    FormRow("Hora de inicio", selectedType?.startTime ?: "—")
+                    TimePickerRow(
+                        label = "Hora de inicio",
+                        hour = startHour, minute = startMinute,
+                        expanded = startExpanded,
+                        onToggle = { startExpanded = !startExpanded; if (startExpanded) endExpanded = false },
+                        onHourChange = { startHour = it },
+                        onMinuteChange = { startMinute = it }
+                    )
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                    FormRow("Hora de fim", selectedType?.endTime ?: "—")
+                    TimePickerRow(
+                        label = "Hora de fim",
+                        hour = endHour, minute = endMinute,
+                        expanded = endExpanded,
+                        onToggle = { endExpanded = !endExpanded; if (endExpanded) startExpanded = false },
+                        onHourChange = { endHour = it },
+                        onMinuteChange = { endMinute = it }
+                    )
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
                     Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), contentAlignment = Alignment.CenterEnd) {
                         Box(modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(DkSurface2).padding(horizontal = 14.dp, vertical = 6.dp)) {
                             Text(duration, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
-                }
-            }
-            item {
-                FormCard(modifier = Modifier.padding(bottom = 16.dp)) {
-                    FormRowClickable("Pausa nao paga", if (breakMin == 0) "Nenhuma" else "${breakMin}min") { showBreakPicker = true }
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                    FormRow("Local de trabalho", "Nenhum")
                 }
             }
             item { Spacer(Modifier.height(20.dp)) }
@@ -1299,35 +1776,6 @@ private fun AddShiftScreen(
                             Text(categoryLabel(u.category), color = TxtGray, fontSize = 13.sp)
                         }
                         if (selectedUser?.id == u.id)
-                            Icon(Icons.Filled.Check, null, tint = Blue, modifier = Modifier.size(20.dp))
-                    }
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                }
-            }
-        }
-    }
-
-    // Picker de tipo de turno
-    if (showShiftTypePicker) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f))
-            .clickable { showShiftTypePicker = false }, contentAlignment = Alignment.BottomCenter) {
-            Column(modifier = Modifier.fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                .background(DkSurface).clickable {}
-                .padding(horizontal = 20.dp, vertical = 24.dp).padding(bottom = 20.dp)) {
-                Text("Selecionar tipo de turno", color = Color.White, fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp))
-                uiState.shiftTypes.forEach { st ->
-                    Row(modifier = Modifier.fillMaxWidth()
-                        .clickable { selectedShiftTypeId = st.id; showShiftTypePicker = false }
-                        .padding(vertical = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text(st.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text("${st.startTime} - ${st.endTime}", color = TxtGray, fontSize = 13.sp)
-                        }
-                        if (selectedShiftTypeId == st.id)
                             Icon(Icons.Filled.Check, null, tint = Blue, modifier = Modifier.size(20.dp))
                     }
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
@@ -1473,7 +1921,7 @@ private fun UserScheduleScreen(
     val userShifts = uiState.shifts
         .filter { it.userId == user.id }
         .sortedBy { it.date }
-    val totalHours = userShifts.sumOf { calcDurationHours(it.shiftType.startTime, it.shiftType.endTime) }
+    val totalHours = userShifts.sumOf { calcDurationHours(it.resolvedStartTime(), it.resolvedEndTime()) }
     val today = LocalDate.now()
 
     Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
@@ -1538,8 +1986,8 @@ private fun UserScheduleScreen(
                         LocalDate.parse(shift.date.take(10))
                     } catch (e: Exception) { weekStart }
                     val isToday = shiftDate == today
-                    val accentColor = shiftCellColor(shift.shiftType, true)
-                    val hours = calcDurationHours(shift.shiftType.startTime, shift.shiftType.endTime)
+                    val accentColor = shiftCellColor(shift.resolvedStartTime(), true)
+                    val hours = calcDurationHours(shift.resolvedStartTime(), shift.resolvedEndTime())
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1580,7 +2028,7 @@ private fun UserScheduleScreen(
                                     color = accentColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    "${shift.shiftType.startTime} - ${shift.shiftType.endTime}",
+                                    "${shift.resolvedStartTime()} - ${shift.resolvedEndTime()}",
                                     color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold
                                 )
                                 Text("${hours}h", color = TxtGray, fontSize = 12.sp)
@@ -1613,13 +2061,17 @@ private fun UserScheduleScreen(
 
 // ── BottomNav ─────────────────────────────────────────────────────────────────
 @Composable
-private fun SchedBottomNav(onHomeClick: () -> Unit) {
+private fun SchedBottomNav(
+    onHomeClick: () -> Unit,
+    onNotificationsClick: () -> Unit = {}
+) {
     val items  = listOf("Inicio" to Icons.Outlined.Home, "Agenda" to Icons.Outlined.DateRange, "Caixa" to Icons.Outlined.Inbox, "Notificacoes" to Icons.Outlined.Notifications, "Menu" to Icons.Outlined.Menu)
-    val badges = listOf(0, 0, 1, 2, 0)
+    val badges = listOf(0, 0, 0, 0, 0)
     Row(
         modifier = Modifier.fillMaxWidth().background(DkSurface)
             .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(0.dp))
-            .padding(top = 10.dp, bottom = 22.dp),
+            .pointerInput(Unit) {}
+            .padding(top = 8.dp, bottom = 16.dp),
         horizontalArrangement = Arrangement.SpaceAround
     ) {
         items.forEachIndexed { i, (label, icon) ->
@@ -1627,7 +2079,15 @@ private fun SchedBottomNav(onHomeClick: () -> Unit) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.let { if (i == 0) it.clickable { onHomeClick() } else it }
+                modifier = Modifier
+                    .clickable {
+                        when (i) {
+                            0 -> onHomeClick()
+                            3 -> onNotificationsClick()
+                            else -> {}
+                        }
+                    }
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
             ) {
                 Box {
                     Icon(icon, contentDescription = label, tint = if (active) Blue else TxtGray, modifier = Modifier.size(22.dp))
@@ -1705,7 +2165,7 @@ private fun HDiv() {
 @Composable
 private fun CriarFuncionarioScreen(
     onBack: () -> Unit,
-    onCreateUser: (CreateUserRequest) -> Unit
+    onCreateUser: (CreateUserRequest, (Boolean, String) -> Unit) -> Unit
 ) {
     var name      by remember { mutableStateOf("") }
     var email     by remember { mutableStateOf("") }
@@ -1715,6 +2175,7 @@ private fun CriarFuncionarioScreen(
     var category  by remember { mutableStateOf("NURSE") }
     var showRolePicker     by remember { mutableStateOf(false) }
     var showCategoryPicker by remember { mutableStateOf(false) }
+    var errorMsg  by remember { mutableStateOf<String?>(null) }
 
     val roles      = listOf("EMPLOYEE" to "Funcionario", "MANAGER" to "Gestor", "ADMIN" to "Administrador")
     val categories = listOf(
@@ -1724,7 +2185,8 @@ private fun CriarFuncionarioScreen(
         "ADMINISTRATIVE" to "Administrativo"
     )
 
-    val isValid = name.isNotBlank() && email.isNotBlank() && empNumber.isNotBlank() && password.length >= 6
+    val emailValid = android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
+    val isValid = name.isNotBlank() && emailValid && empNumber.isNotBlank() && password.length >= 6
 
     Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).padding(bottom = 16.dp),
@@ -1733,20 +2195,32 @@ private fun CriarFuncionarioScreen(
             Text("Novo Funcionario", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             TextButton(
                 onClick = {
+                    errorMsg = null
                     onCreateUser(CreateUserRequest(
                         name = name.trim(), email = email.trim().lowercase(),
                         employeeNumber = empNumber.trim(), role = role,
                         category = category, password = password
-                    ))
+                    )) { _, msg -> errorMsg = msg }
                 },
                 enabled = isValid
             ) {
-                Text("Criar", color = if (isValid) Blue else TxtGray, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text("Criar", color = if (isValid) Blue else Color(0xFF3A3A3C), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
 
         LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
             item {
+                if (errorMsg != null) {
+                    Text(
+                        errorMsg!!,
+                        color = RedBadge,
+                        fontSize = 13.sp,
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                            .background(RedBadge.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
                 Text("DADOS PESSOAIS", color = TxtGray, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                     letterSpacing = 0.8.sp, modifier = Modifier.padding(bottom = 10.dp))
                 FormCard(modifier = Modifier.padding(bottom = 16.dp)) {
@@ -1859,7 +2333,7 @@ private fun CriarFormField(
             modifier = Modifier.weight(0.6f),
             decorationBox = { inner ->
                 Box(contentAlignment = Alignment.CenterEnd) {
-                    if (value.isEmpty()) Text(placeholder, color = TxtGray, fontSize = 15.sp, textAlign = TextAlign.End, modifier = Modifier.fillMaxWidth())
+                    if (value.isEmpty()) Text(placeholder, color = Color(0xFF48484A), fontSize = 15.sp, textAlign = TextAlign.End, modifier = Modifier.fillMaxWidth())
                     inner()
                 }
             }

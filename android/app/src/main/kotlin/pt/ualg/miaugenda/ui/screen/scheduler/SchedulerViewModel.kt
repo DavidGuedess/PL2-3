@@ -11,10 +11,14 @@ import kotlinx.coroutines.launch
 import pt.ualg.miaugenda.MiauGendaApp
 import pt.ualg.miaugenda.data.model.CreateShiftRequest
 import pt.ualg.miaugenda.data.model.CreateUserRequest
+import pt.ualg.miaugenda.data.model.CreateWeekAssignmentRequest
 import pt.ualg.miaugenda.data.model.Shift
+import pt.ualg.miaugenda.data.model.resolvedStartTime
+import pt.ualg.miaugenda.data.model.resolvedEndTime
 import pt.ualg.miaugenda.data.model.ShiftType
 import pt.ualg.miaugenda.data.model.UpdateShiftRequest
 import pt.ualg.miaugenda.data.model.User
+import pt.ualg.miaugenda.data.model.WeekAssignment
 import pt.ualg.miaugenda.data.remote.RetrofitClient
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -23,6 +27,7 @@ data class SchedulerUiState(
     val shifts: List<Shift> = emptyList(),
     val users: List<User> = emptyList(),
     val shiftTypes: List<ShiftType> = emptyList(),
+    val weekAssignments: List<WeekAssignment> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null
 )
@@ -80,17 +85,20 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
                     val shiftsD     = async { RetrofitClient.shiftApi.getShifts(week = weekStr) }
                     val usersD      = async { RetrofitClient.userApi.getUsers() }
                     val shiftTypesD = async { RetrofitClient.shiftApi.getShiftTypes() }
+                    val waD         = async { RetrofitClient.weekAssignmentApi.getWeekAssignments(week = weekStr) }
 
                     val sR  = shiftsD.await()
                     val uR  = usersD.await()
                     val stR = shiftTypesD.await()
+                    val waR = waD.await()
 
                     if (sR.isSuccessful && uR.isSuccessful && stR.isSuccessful) {
                         _uiState.value = _uiState.value.copy(
-                            shifts     = sR.body().orEmpty(),
-                            users      = uR.body().orEmpty(),
-                            shiftTypes = stR.body().orEmpty(),
-                            isLoading  = false
+                            shifts          = sR.body().orEmpty(),
+                            users           = uR.body().orEmpty(),
+                            shiftTypes      = stR.body().orEmpty(),
+                            weekAssignments = waR.body().orEmpty(),
+                            isLoading       = false
                         )
                     } else {
                         _uiState.value = _uiState.value.copy(
@@ -108,20 +116,38 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun createShift(userId: Int, shiftTypeId: Int, date: String, onResult: (Boolean, String) -> Unit) {
+    private fun parseApiError(bodyStr: String?, fallback: String): String {
+        return try {
+            val json = org.json.JSONObject(bodyStr ?: "")
+            val errors = json.optJSONArray("errors")
+            if (errors != null && errors.length() > 0) {
+                val first = errors.getJSONObject(0)
+                val path = first.optString("path", "")
+                val msg = first.optString("message", fallback)
+                if (path.isNotEmpty()) "[$path] $msg" else msg
+            } else {
+                json.optString("message", fallback)
+            }
+        } catch (_: Exception) { fallback }
+    }
+
+    fun createShift(userId: Int, date: String, startTime: String, endTime: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             try {
+                android.util.Log.d("SHIFT_DEBUG", "createShift: userId=$userId date=$date start=$startTime end=$endTime")
                 val r = RetrofitClient.shiftApi.createShift(
-                    CreateShiftRequest(userId = userId, shiftTypeId = shiftTypeId, date = date)
+                    CreateShiftRequest(userId = userId, date = date, startTime = startTime, endTime = endTime)
                 )
                 if (r.isSuccessful) {
                     loadWeek()
                     onResult(true, "Turno criado como rascunho")
                 } else {
+                    val body = r.errorBody()?.string()
+                    android.util.Log.d("SHIFT_DEBUG", "createShift error ${r.code()}: $body")
                     onResult(false, when (r.code()) {
-                        409 -> "Conflito: funcionario ja tem turno nessa data"
+                        409 -> parseApiError(body, "Conflito de horario com turno existente")
                         403 -> "Sem permissao para criar turnos"
-                        else -> "Erro ao criar turno (${r.code()})"
+                        else -> parseApiError(body, "Erro ao criar turno (${r.code()})")
                     })
                 }
             } catch (e: Exception) {
@@ -130,21 +156,24 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun updateShift(shiftId: Int, shiftTypeId: Int? = null, date: String? = null, onResult: (Boolean, String) -> Unit) {
+    fun updateShift(shiftId: Int, date: String? = null, startTime: String? = null, endTime: String? = null, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             try {
+                android.util.Log.d("SHIFT_DEBUG", "updateShift: id=$shiftId date=$date start=$startTime end=$endTime")
                 val r = RetrofitClient.shiftApi.updateShift(
-                    shiftId, UpdateShiftRequest(shiftTypeId = shiftTypeId, date = date)
+                    shiftId, UpdateShiftRequest(startTime = startTime, endTime = endTime, date = date)
                 )
                 if (r.isSuccessful) {
                     loadWeek()
                     onResult(true, "Turno atualizado com sucesso")
                 } else {
+                    val body = r.errorBody()?.string()
+                    android.util.Log.d("SHIFT_DEBUG", "updateShift error ${r.code()}: $body")
                     onResult(false, when (r.code()) {
-                        409 -> "Conflito: funcionario ja tem turno nessa data"
+                        409 -> parseApiError(body, "Conflito de horario com turno existente")
                         404 -> "Turno nao encontrado"
                         403 -> "Sem permissao para editar turnos"
-                        else -> "Erro ao atualizar turno"
+                        else -> parseApiError(body, "Erro ao atualizar turno (${r.code()})")
                     })
                 }
             } catch (e: Exception) {
@@ -167,7 +196,7 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                     onResult(true, "Turno publicado com sucesso")
                 } else {
-                    onResult(false, "Erro ao publicar turno")
+                    onResult(false, "Erro ao publicar turno (${r.code()})")
                 }
             } catch (e: Exception) {
                 onResult(false, "Sem ligacao ao servidor")
@@ -240,6 +269,90 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
                         else -> "Erro ao criar funcionario (${r.code()})"
                     })
                 }
+            } catch (e: Exception) {
+                onResult(false, "Sem ligacao ao servidor")
+            }
+        }
+    }
+
+    fun addUserToWeek(userId: Int, weekStr: String, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val r = RetrofitClient.weekAssignmentApi.createWeekAssignment(
+                    CreateWeekAssignmentRequest(userId = userId, weekStart = weekStr)
+                )
+                if (r.isSuccessful) {
+                    // Refetch weekAssignments para garantir estado atualizado
+                    refreshWeekAssignments(weekStr)
+                    onResult(true)
+                } else {
+                    onResult(false)
+                }
+            } catch (e: Exception) {
+                onResult(false)
+            }
+        }
+    }
+
+    fun removeUserFromWeek(assignmentId: Int, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val r = RetrofitClient.weekAssignmentApi.deleteWeekAssignment(assignmentId)
+                if (r.isSuccessful || r.code() == 204) {
+                    val removedAssignment = _uiState.value.weekAssignments.find { it.id == assignmentId }
+                    val newAssignments = _uiState.value.weekAssignments.filter { it.id != assignmentId }
+                    val newShifts = if (removedAssignment != null)
+                        _uiState.value.shifts.filter { it.userId != removedAssignment.userId }
+                    else
+                        _uiState.value.shifts
+                    _uiState.value = _uiState.value.copy(
+                        weekAssignments = newAssignments,
+                        shifts = newShifts
+                    )
+                    onResult(true)
+                } else {
+                    onResult(false)
+                }
+            } catch (e: Exception) {
+                onResult(false)
+            }
+        }
+    }
+
+    private suspend fun refreshWeekAssignments(weekStr: String) {
+        try {
+            val waR = RetrofitClient.weekAssignmentApi.getWeekAssignments(week = weekStr)
+            if (waR.isSuccessful) {
+                _uiState.value = _uiState.value.copy(weekAssignments = waR.body().orEmpty())
+            }
+        } catch (_: Exception) { }
+    }
+
+    fun copyWeek(targetWeek: LocalDate, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val sourceShifts = _uiState.value.shifts
+            if (sourceShifts.isEmpty()) {
+                onResult(false, "Nao ha turnos para copiar nesta semana")
+                return@launch
+            }
+            try {
+                var created = 0; var conflicts = 0
+                sourceShifts.forEach { shift ->
+                    val sourceDate = LocalDate.parse(shift.date.substring(0, 10))
+                    val dayOffset = java.time.temporal.ChronoUnit.DAYS.between(currentWeek, sourceDate)
+                    val targetDate = targetWeek.plusDays(dayOffset).format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    val r = RetrofitClient.shiftApi.createShift(
+                        CreateShiftRequest(
+                            userId = shift.userId,
+                            date = targetDate,
+                            startTime = shift.resolvedStartTime(),
+                            endTime = shift.resolvedEndTime(),
+                            shiftTypeId = shift.shiftTypeId
+                        )
+                    )
+                    if (r.isSuccessful) created++ else if (r.code() == 409) conflicts++
+                }
+                onResult(true, if (conflicts == 0) "$created turnos copiados" else "$created copiados, $conflicts com conflito")
             } catch (e: Exception) {
                 onResult(false, "Sem ligacao ao servidor")
             }

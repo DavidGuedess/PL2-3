@@ -9,6 +9,13 @@ const prisma = new PrismaClient()
 
 router.use(authenticate)
 
+router.use((req, _res, next) => {
+  if (req.method !== 'GET') {
+    console.log(`[shifts] ${req.method} ${req.path} | body: ${JSON.stringify(req.body)}`)
+  }
+  next()
+})
+
 function toMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number)
   return h * 60 + m
@@ -125,52 +132,51 @@ function getMonthRange(monthStr: string): { start: Date; end: Date } {
  */
 router.post('/', requireRole('ADMIN', 'MANAGER'), validate(createShiftSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, shiftTypeId, date } = req.body
+    const { userId, shiftTypeId, date, startTime, endTime } = req.body
 
     const user = await prisma.user.findUnique({ where: { id: userId } })
     if (!user) {
       return res.status(404).json({ message: 'User not found' })
     }
 
-    const shiftType = await prisma.shiftType.findUnique({ where: { id: shiftTypeId } })
-    if (!shiftType) {
-      return res.status(404).json({ message: 'Shift type not found' })
+    let resolvedShiftTypeId = shiftTypeId ?? null
+    let resolvedStartTime = startTime ?? null
+    let resolvedEndTime = endTime ?? null
+
+    if (shiftTypeId && (!startTime || !endTime)) {
+      const shiftType = await prisma.shiftType.findUnique({ where: { id: shiftTypeId } })
+      if (!shiftType) return res.status(404).json({ message: 'Shift type not found' })
+      resolvedStartTime = resolvedStartTime ?? shiftType.startTime
+      resolvedEndTime = resolvedEndTime ?? shiftType.endTime
     }
 
     const shiftDate = new Date(date)
 
-    const dayBefore = new Date(shiftDate)
-    dayBefore.setUTCDate(shiftDate.getUTCDate() - 1)
-    const dayAfter = new Date(shiftDate)
-    dayAfter.setUTCDate(shiftDate.getUTCDate() + 1)
-
-    const nearbyShifts = await prisma.shift.findMany({
-      where: { userId, date: { gte: dayBefore, lte: dayAfter } },
-      include: { shiftType: true }
-    })
-
-    const conflict = nearbyShifts.find(s =>
-      shiftsOverlap(shiftDate, shiftType.startTime, shiftType.endTime, s.date, s.shiftType.startTime, s.shiftType.endTime)
-    )
-
-    if (conflict) {
-      const conflictDate = new Date(conflict.date).toISOString().slice(0, 10)
-      return res.status(409).json({
-        message: `Shift conflict: '${shiftType.name}' (${shiftType.startTime}–${shiftType.endTime}) overlaps with existing shift '${conflict.shiftType.name}' (${conflict.shiftType.startTime}–${conflict.shiftType.endTime}) on ${conflictDate}`
-      })
-    }
-
+    // Turnos rascunho nunca entram em conflito — o conflito só é verificado ao publicar
     const shift = await prisma.shift.create({
       data: {
         userId,
-        shiftTypeId,
+        shiftTypeId: resolvedShiftTypeId,
         date: shiftDate,
+        startTime: resolvedStartTime,
+        endTime: resolvedEndTime,
         published: false
       },
       include: {
         user: { select: { id: true, name: true, employeeNumber: true, role: true, category: true } },
         shiftType: true
       }
+    })
+
+    // Garante que o utilizador aparece na grelha desta semana
+    const weekStart = new Date(shiftDate)
+    const dow = weekStart.getUTCDay()
+    weekStart.setUTCDate(shiftDate.getUTCDate() + (dow === 0 ? -6 : 1 - dow))
+    weekStart.setUTCHours(0, 0, 0, 0)
+    await prisma.weekAssignment.upsert({
+      where: { userId_weekStart: { userId, weekStart } },
+      update: {},
+      create: { userId, weekStart }
     })
 
     res.status(201).json(shift)
@@ -354,34 +360,47 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 router.patch('/:id', requireRole('ADMIN', 'MANAGER'), validate(updateShiftSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id)
-    const { shiftTypeId, date, published } = req.body
+    const { shiftTypeId, date, startTime, endTime, published } = req.body
 
-    const existing = await prisma.shift.findUnique({ where: { id } })
+    const existing = await prisma.shift.findUnique({ where: { id }, include: { shiftType: true } })
     if (!existing) {
       return res.status(404).json({ message: 'Shift not found' })
     }
 
-    if (shiftTypeId) {
-      const shiftType = await prisma.shiftType.findUnique({ where: { id: shiftTypeId } })
-      if (!shiftType) {
-        return res.status(404).json({ message: 'Shift type not found' })
-      }
-    }
+    // Resolve effective times for this update
+    const resolvedStartTime = startTime ?? existing.startTime ?? existing.shiftType?.startTime
+    const resolvedEndTime   = endTime   ?? existing.endTime   ?? existing.shiftType?.endTime
+    const resolvedDate      = date ? new Date(date) : new Date(existing.date)
 
-    if (date) {
-      const shiftDate = new Date(date)
-      const conflict = await prisma.shift.findUnique({
-        where: { userId_date: { userId: existing.userId, date: shiftDate } }
+    // Check for overlap when: publishing a draft OR editing times of an already-published shift
+    const shouldCheckConflict = published === true || (existing.published && (startTime || endTime || date))
+    if (shouldCheckConflict && resolvedStartTime && resolvedEndTime) {
+      const allPublished = await prisma.shift.findMany({
+        where: { userId: existing.userId, published: true, NOT: { id } },
+        include: { shiftType: true }
       })
-      if (conflict && conflict.id !== id) {
-        return res.status(409).json({ message: 'User already has a shift on this date' })
+      const conflict = allPublished.find(s => {
+        const sStart = s.startTime ?? s.shiftType?.startTime
+        const sEnd   = s.endTime   ?? s.shiftType?.endTime
+        if (!sStart || !sEnd) return false
+        return shiftsOverlap(resolvedDate, resolvedStartTime, resolvedEndTime, new Date(s.date), sStart, sEnd)
+      })
+      if (conflict) {
+        const cDate  = new Date(conflict.date).toISOString().slice(0, 10)
+        const cStart = conflict.startTime ?? conflict.shiftType?.startTime ?? '?'
+        const cEnd   = conflict.endTime   ?? conflict.shiftType?.endTime   ?? '?'
+        return res.status(409).json({
+          message: `Shift conflict: '${resolvedStartTime}–${resolvedEndTime}' overlaps with existing shift '${cStart}–${cEnd}' on ${cDate}`
+        })
       }
     }
 
-    const updateData: { shiftTypeId?: number; date?: Date; published?: boolean } = {}
-    if (shiftTypeId) updateData.shiftTypeId = shiftTypeId
+    const updateData: { shiftTypeId?: number | null; date?: Date; startTime?: string | null; endTime?: string | null; published?: boolean } = {}
+    if (shiftTypeId !== undefined) updateData.shiftTypeId = shiftTypeId
     if (date) updateData.date = new Date(date)
-    if (published !== undefined) updateData.published = Boolean(published)
+    if (startTime !== undefined) updateData.startTime = startTime
+    if (endTime !== undefined) updateData.endTime = endTime
+    if (published != null) updateData.published = Boolean(published)
 
     const shift = await prisma.shift.update({
       where: { id },

@@ -42,6 +42,6 @@ app.get('/health', (_req, res) => {
 app.use('/users', usersRoutes)
 app.use('/api/auth', authRoutes)
 
-app.listen(PORT, () => {
-  console.log(`Miaugenda API running on http://localhost:${PORT}`)
+app.listen(Number(PORT), '0.0.0.0', () => {
+  console.log(`Miaugenda API running on http://0.0.0.0:${PORT}`)
 })

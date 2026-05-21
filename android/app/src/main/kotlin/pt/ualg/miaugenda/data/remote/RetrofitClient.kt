@@ -1,6 +1,7 @@
 package pt.ualg.miaugenda.data.remote
 
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.logging.HttpLoggingInterceptor
 import pt.ualg.miaugenda.BuildConfig
 import retrofit2.Retrofit
@@ -14,6 +15,7 @@ object RetrofitClient {
     private var shiftApiInstance: ShiftApi? = null
     private var attendanceApiInstance: AttendanceApi? = null
     private var userApiInstance: UserApi? = null
+    private var weekAssignmentApiInstance: WeekAssignmentApi? = null
     
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = if (BuildConfig.DEBUG) {
@@ -25,6 +27,7 @@ object RetrofitClient {
 
     private fun createOkHttpClient(): OkHttpClient {
         val builder = OkHttpClient.Builder()
+            .protocols(listOf(Protocol.HTTP_1_1))
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -55,6 +58,7 @@ object RetrofitClient {
         shiftApiInstance = null
         attendanceApiInstance = null
         userApiInstance = null
+        weekAssignmentApiInstance = null
     }
 
     val authApi: AuthApi
@@ -87,5 +91,13 @@ object RetrofitClient {
                 userApiInstance = getRetrofit().create(UserApi::class.java)
             }
             return userApiInstance!!
+        }
+
+    val weekAssignmentApi: WeekAssignmentApi
+        get() {
+            if (weekAssignmentApiInstance == null) {
+                weekAssignmentApiInstance = getRetrofit().create(WeekAssignmentApi::class.java)
+            }
+            return weekAssignmentApiInstance!!
         }
 }

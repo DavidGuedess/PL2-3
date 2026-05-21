@@ -35,6 +35,7 @@ model User {
   refreshTokens      RefreshToken[]
   shifts             Shift[]
   attendanceRecords  AttendanceRecord[]
+  weekAssignments    WeekAssignment[]
 }
 
 model ShiftType {
@@ -48,17 +49,27 @@ model ShiftType {
 }
 
 model Shift {
-  id          Int       @id @default(autoincrement())
+  id          Int        @id @default(autoincrement())
   userId      Int
-  shiftTypeId Int
-  date        DateTime  @db.Date
-  published   Boolean   @default(false)
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  shiftType   ShiftType @relation(fields: [shiftTypeId], references: [id])
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  shiftTypeId Int?
+  date        DateTime   @db.Date
+  startTime   String?
+  endTime     String?
+  published   Boolean    @default(false)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shiftType   ShiftType? @relation(fields: [shiftTypeId], references: [id])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
 
-  @@unique([userId, date])
+model WeekAssignment {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  weekStart DateTime @db.Date
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, weekStart])
 }
 
 enum AttendanceType {

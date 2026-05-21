@@ -12,7 +12,9 @@ import pt.ualg.miaugenda.ui.screen.checkin.CheckInScreen
 import pt.ualg.miaugenda.ui.screen.profile.ProfileScreen
 import pt.ualg.miaugenda.ui.screen.attendancehistory.AttendanceHistoryScreen
 import pt.ualg.miaugenda.ui.screen.attendancemonitor.AttendanceMonitorScreen
+import pt.ualg.miaugenda.ui.screen.notifications.NotificationsScreen
 import pt.ualg.miaugenda.ui.screen.scheduler.SchedulerScreen
+import pt.ualg.miaugenda.ui.screen.inbox.InboxScreen
 
 sealed class Screen(val route: String) {
     object Login : Screen("login")
@@ -22,6 +24,8 @@ sealed class Screen(val route: String) {
     object AttendanceHistory : Screen("attendance_history")
     object AttendanceMonitor : Screen("attendance_monitor")
     object Scheduler : Screen("scheduler")
+    object Notifications : Screen("notifications")
+    object Inbox : Screen("inbox")
 }
 
 @Composable
@@ -64,6 +68,32 @@ fun NavGraph(
                 },
                 onSchedulerClick = {
                     navController.navigate(Screen.Scheduler.route)
+                },
+                onNotificationsClick = {
+                    navController.navigate(Screen.Notifications.route)
+                },
+                onInboxClick = {
+                    navController.navigate(Screen.Inbox.route)
+                }
+            )
+        }
+
+        composable(Screen.Inbox.route) {
+            InboxScreen(
+                onSchedulerClick = {
+                    navController.navigate(Screen.Scheduler.route) {
+                        popUpTo(Screen.Scheduler.route) { inclusive = true }
+                    }
+                },
+                onNotificationsClick = {
+                    navController.navigate(Screen.Notifications.route) {
+                        popUpTo(Screen.Notifications.route) { inclusive = true }
+                    }
+                },
+                onHomeClick = {
+                    navController.navigate(Screen.Dashboard.route) {
+                        popUpTo(Screen.Dashboard.route) { inclusive = true }
+                    }
                 }
             )
         }
@@ -73,6 +103,37 @@ fun NavGraph(
                 onNavigateToHome = {
                     navController.navigate(Screen.Dashboard.route) {
                         popUpTo(Screen.Dashboard.route) { inclusive = true }
+                    }
+                },
+                onNavigateToNotifications = {
+                    navController.navigate(Screen.Notifications.route)
+                },
+                onNavigateToInbox = {
+                    navController.navigate(Screen.Inbox.route) {
+                        popUpTo(Screen.Inbox.route) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable(Screen.Notifications.route) {
+            val context = LocalContext.current
+            val tokenManager = MiauGendaApp.getTokenManager(context)
+            NotificationsScreen(
+                managerName = tokenManager.getUserName() ?: "Gerente",
+                onNavigateToScheduler = {
+                    navController.navigate(Screen.Scheduler.route) {
+                        popUpTo(Screen.Scheduler.route) { inclusive = true }
+                    }
+                },
+                onNavigateToHome = {
+                    navController.navigate(Screen.Dashboard.route) {
+                        popUpTo(Screen.Dashboard.route) { inclusive = true }
+                    }
+                },
+                onNavigateToInbox = {
+                    navController.navigate(Screen.Inbox.route) {
+                        popUpTo(Screen.Inbox.route) { inclusive = true }
                     }
                 }
             )
