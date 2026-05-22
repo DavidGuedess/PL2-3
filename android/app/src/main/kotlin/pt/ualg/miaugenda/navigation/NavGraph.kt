@@ -15,6 +15,8 @@ import pt.ualg.miaugenda.ui.screen.attendancemonitor.AttendanceMonitorScreen
 import pt.ualg.miaugenda.ui.screen.notifications.NotificationsScreen
 import pt.ualg.miaugenda.ui.screen.scheduler.SchedulerScreen
 import pt.ualg.miaugenda.ui.screen.inbox.InboxScreen
+import pt.ualg.miaugenda.ui.screen.team.TeamScreen
+import pt.ualg.miaugenda.ui.screen.dashboard.ScreenDisponibilidadePreferencia
 
 sealed class Screen(val route: String) {
     object Login : Screen("login")
@@ -26,6 +28,8 @@ sealed class Screen(val route: String) {
     object Scheduler : Screen("scheduler")
     object Notifications : Screen("notifications")
     object Inbox : Screen("inbox")
+    object Team : Screen("team")
+    object Availability : Screen("availability")
 }
 
 @Composable
@@ -74,6 +78,9 @@ fun NavGraph(
                 },
                 onInboxClick = {
                     navController.navigate(Screen.Inbox.route)
+                },
+                onEquipaClick = {
+                    navController.navigate(Screen.Team.route)
                 }
             )
         }
@@ -94,6 +101,11 @@ fun NavGraph(
                     navController.navigate(Screen.Dashboard.route) {
                         popUpTo(Screen.Dashboard.route) { inclusive = true }
                     }
+                },
+                onEquipaClick = {
+                    navController.navigate(Screen.Team.route) {
+                        popUpTo(Screen.Team.route) { inclusive = true }
+                    }
                 }
             )
         }
@@ -111,6 +123,11 @@ fun NavGraph(
                 onNavigateToInbox = {
                     navController.navigate(Screen.Inbox.route) {
                         popUpTo(Screen.Inbox.route) { inclusive = true }
+                    }
+                },
+                onNavigateToEquipa = {
+                    navController.navigate(Screen.Team.route) {
+                        popUpTo(Screen.Team.route) { inclusive = true }
                     }
                 }
             )
@@ -135,6 +152,11 @@ fun NavGraph(
                     navController.navigate(Screen.Inbox.route) {
                         popUpTo(Screen.Inbox.route) { inclusive = true }
                     }
+                },
+                onNavigateToEquipa = {
+                    navController.navigate(Screen.Team.route) {
+                        popUpTo(Screen.Team.route) { inclusive = true }
+                    }
                 }
             )
         }
@@ -151,7 +173,21 @@ fun NavGraph(
             ProfileScreen(
                 onBack = {
                     navController.popBackStack()
+                },
+                onLogout = {
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                },
+                onAvailabilityClick = {
+                    navController.navigate(Screen.Availability.route)
                 }
+            )
+        }
+
+        composable(Screen.Availability.route) {
+            ScreenDisponibilidadePreferencia(
+                onBack = { navController.popBackStack() }
             )
         }
 
@@ -165,6 +201,14 @@ fun NavGraph(
 
         composable(Screen.AttendanceMonitor.route) {
             AttendanceMonitorScreen(
+                onBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable(Screen.Team.route) {
+            TeamScreen(
                 onBack = {
                     navController.popBackStack()
                 }

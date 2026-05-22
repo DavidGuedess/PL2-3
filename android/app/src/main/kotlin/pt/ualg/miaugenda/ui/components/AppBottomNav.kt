@@ -36,7 +36,8 @@ fun AppBottomNav(
     onHomeClick: () -> Unit = {},
     onSchedulerClick: () -> Unit = {},
     onInboxClick: () -> Unit = {},
-    onNotificationsClick: () -> Unit = {}
+    onNotificationsClick: () -> Unit = {},
+    onMenuClick: () -> Unit = {}
 ) {
     data class Item(val tab: NavTab, val label: String, val icon: ImageVector, val badge: Int, val onClick: () -> Unit)
 
@@ -45,7 +46,7 @@ fun AppBottomNav(
         Item(NavTab.SCHEDULER,     "Agenda",       Icons.Outlined.DateRange,     0,                 onSchedulerClick),
         Item(NavTab.INBOX,         "Caixa",        Icons.Outlined.Inbox,         inboxCount,        onInboxClick),
         Item(NavTab.NOTIFICATIONS, "Notificacoes", Icons.Outlined.Notifications, notificationCount, onNotificationsClick),
-        Item(NavTab.MENU,          "Menu",         Icons.Outlined.Menu,          0,                 {}),
+        Item(NavTab.MENU,          "Equipa",       Icons.Outlined.Group,         0,                 onMenuClick),
     )
 
     Row(

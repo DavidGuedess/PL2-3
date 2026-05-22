@@ -7,8 +7,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.runtime.derivedStateOf
+import java.time.YearMonth
+import java.time.temporal.ChronoUnit
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -67,10 +77,18 @@ private val AvatarGrad = Brush.linearGradient(
     listOf(Color(0xFF5B5FEF), Color(0xFFC850C0), Color(0xFFF0696B))
 )
 
+// ── Disponibilidade ───────────────────────────────────────────────────────────
+data class AvailabilityPref(
+    val tipo: String,        // "PREFERIDA" | "INDISPONIVEL"
+    val diaInteiro: Boolean,
+    val nota: String = ""
+)
+
 // ── Sub-ecrãs internos ────────────────────────────────────────────────────────
 private enum class SubScreen {
     Home, TurnosAgendados, AguardaConfirmacao, TurnosAbertos,
-    EmPausa, EmTurno, ShiftOffer, FolhasPonto
+    EmPausa, EmTurno, ShiftOffer, FolhasPonto,
+    PedidoFerias, PedidoTroca, DisponibilidadePreferencia
 }
 
 private enum class ClockState { NO_SHIFT, HAS_SHIFT, CLOCKED_IN }
@@ -86,12 +104,14 @@ fun DashboardScreen(
     onSchedulerClick: () -> Unit = {},
     onNotificationsClick: () -> Unit = {},
     onInboxClick: () -> Unit = {},
+    onEquipaClick: () -> Unit = {},
     viewModel: DashboardViewModel = viewModel()
 ) {
     val context      = LocalContext.current
     val tokenManager = MiauGendaApp.getTokenManager(context)
     val uiState      by viewModel.uiState.collectAsState()
-    val firstName    = (tokenManager.getUserName() ?: "Xavier").split(" ").first()
+    val fullName     = tokenManager.getUserName() ?: "Xavier"
+    val firstName    = fullName.split(" ").first()
 
     val today      = LocalDate.now()
     val weekStart  = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
@@ -117,12 +137,14 @@ fun DashboardScreen(
                 clockedInSince        = uiState.clockedInSince,
                 onNavigate            = { subScreen = it },
                 onLogout              = { tokenManager.clearTokens(); onLogout() },
+                onProfileClick        = onProfileClick,
                 onApprove             = { showApproveDialog = true },
                 onClockIn             = { viewModel.clockIn {} },
                 onClockOut            = { viewModel.clockOut {} },
                 onSchedulerClick      = onSchedulerClick,
                 onNotificationsClick  = onNotificationsClick,
-                onInboxClick          = onInboxClick
+                onInboxClick          = onInboxClick,
+                onEquipaClick         = onEquipaClick
             )
             SubScreen.TurnosAgendados    -> ScreenTurnosAgendados(onBack = { subScreen = SubScreen.Home })
             SubScreen.AguardaConfirmacao -> ScreenAguardaConfirmacao(onBack = { subScreen = SubScreen.Home })
@@ -131,6 +153,9 @@ fun DashboardScreen(
             SubScreen.EmTurno            -> ScreenEmTurno(onBack = { subScreen = SubScreen.Home })
             SubScreen.ShiftOffer         -> ScreenShiftOffer(onBack = { subScreen = SubScreen.Home })
             SubScreen.FolhasPonto        -> ScreenFolhasPonto(onBack = { subScreen = SubScreen.Home }, onSchedulerClick = onSchedulerClick, onNotificationsClick = onNotificationsClick, onInboxClick = onInboxClick)
+            SubScreen.PedidoFerias       -> PedidoFeriasScreen(userName = fullName, onBack = { subScreen = SubScreen.Home })
+            SubScreen.PedidoTroca        -> PedidoTrocaScreen(myShifts = uiState.shifts.filter { it.published }, onBack = { subScreen = SubScreen.Home })
+            SubScreen.DisponibilidadePreferencia -> ScreenDisponibilidadePreferencia(onBack = { subScreen = SubScreen.Home })
         }
         if (showApproveDialog) {
             ApproveDialog(onClose = { showApproveDialog = false })
@@ -148,12 +173,14 @@ private fun HomeScreen(
     clockedInSince: String? = null,
     onNavigate: (SubScreen) -> Unit,
     onLogout: () -> Unit,
+    onProfileClick: () -> Unit = {},
     onApprove: () -> Unit,
     onClockIn: () -> Unit = {},
     onClockOut: () -> Unit = {},
     onSchedulerClick: () -> Unit = {},
     onNotificationsClick: () -> Unit = {},
-    onInboxClick: () -> Unit = {}
+    onInboxClick: () -> Unit = {},
+    onEquipaClick: () -> Unit = {}
 ) {
     var fabOpen by remember { mutableStateOf(false) }
 
@@ -214,7 +241,7 @@ private fun HomeScreen(
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
-                item { DashHeader(firstName, onLogout) }
+                item { DashHeader(firstName, onProfileClick) }
 
                 item {
                     Text(
@@ -250,13 +277,17 @@ private fun HomeScreen(
 
                 item { SectionTitle("Esta Semana", topPad = 8.dp) }
                 item { EstaSemanaSection(shifts, today) }
+
+                item { SectionTitle("Pedidos Enviados", topPad = 8.dp) }
+                item { PedidosEnviadosSection() }
                 item { Spacer(Modifier.height(28.dp)) }
             }
             AppBottomNav(
                 active               = NavTab.HOME,
                 onSchedulerClick     = onSchedulerClick,
                 onNotificationsClick = onNotificationsClick,
-                onInboxClick         = onInboxClick
+                onInboxClick         = onInboxClick,
+                onMenuClick          = onEquipaClick
             )
         }
 
@@ -271,15 +302,22 @@ private fun HomeScreen(
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(end = 20.dp, bottom = 86.dp),
+                        .padding(end = 20.dp, bottom = 152.dp)
+                        .clickable(enabled = false) {},
                     horizontalAlignment = Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(22.dp)
                 ) {
-                    FabMenuItem("Novo Pedido de Troca", Icons.Outlined.SwapHoriz) {
+                    FabMenuItem("Disponibilidade", Icons.Outlined.EventAvailable) {
                         fabOpen = false
+                        onNavigate(SubScreen.DisponibilidadePreferencia)
                     }
-                    FabMenuItem("Novo Pedido de Folga", Icons.Outlined.EventBusy) {
+                    FabMenuItem("Pedido de Troca", Icons.Outlined.SwapHoriz) {
                         fabOpen = false
+                        onNavigate(SubScreen.PedidoTroca)
+                    }
+                    FabMenuItem("Pedido de Férias", Icons.Outlined.WbSunny) {
+                        fabOpen = false
+                        onNavigate(SubScreen.PedidoFerias)
                     }
                 }
             }
@@ -308,7 +346,7 @@ private fun HomeScreen(
 
 // ── DashHeader ────────────────────────────────────────────────────────────────
 @Composable
-private fun DashHeader(firstName: String, onLogout: () -> Unit) {
+private fun DashHeader(firstName: String, onProfileClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -323,7 +361,7 @@ private fun DashHeader(firstName: String, onLogout: () -> Unit) {
                 .size(42.dp)
                 .clip(CircleShape)
                 .background(AvatarGrad)
-                .clickable { onLogout() },
+                .clickable { onProfileClick() },
             contentAlignment = Alignment.Center
         ) {
             Text(
@@ -782,13 +820,20 @@ private fun EstaSemanaSection(shifts: List<Shift>, today: LocalDate) {
                         Text(dayAbbr, color = dayColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
 
-                    Box(
+                    Row(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(12.dp))
                             .background(DkSurface)
                     ) {
-                        Row(modifier = Modifier.padding(start = 14.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)) {
+                        // Blue left border
+                        Box(
+                            modifier = Modifier
+                                .width(4.dp)
+                                .fillMaxHeight()
+                                .background(Blue)
+                        )
+                        Row(modifier = Modifier.weight(1f).padding(start = 10.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     shift.resolvedName(),
@@ -819,13 +864,6 @@ private fun EstaSemanaSection(shifts: List<Shift>, today: LocalDate) {
                                 DkStatusBadge("Hoje", Blue, Blue.copy(alpha = 0.15f))
                             }
                         }
-                        // Blue left border
-                        Box(
-                            modifier = Modifier
-                                .width(4.dp)
-                                .matchParentSize()
-                                .background(Blue)
-                        )
                     }
                 }
             }
@@ -843,6 +881,7 @@ private fun EstaSemanaSection(shifts: List<Shift>, today: LocalDate) {
 @Composable
 private fun FabMenuItem(label: String, icon: ImageVector, onClick: () -> Unit) {
     Row(
+        modifier = Modifier.clickable { onClick() },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(18.dp)
     ) {
@@ -851,8 +890,7 @@ private fun FabMenuItem(label: String, icon: ImageVector, onClick: () -> Unit) {
             modifier = Modifier
                 .size(50.dp)
                 .clip(CircleShape)
-                .background(Blue)
-                .clickable { onClick() },
+                .background(Blue),
             contentAlignment = Alignment.Center
         ) {
             Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
@@ -1603,6 +1641,939 @@ private fun ScreenFolhasPonto(onBack: () -> Unit, onSchedulerClick: () -> Unit =
             onNotificationsClick = onNotificationsClick,
             onInboxClick         = onInboxClick
         )
+    }
+
+}
+
+// ── ScreenDisponibilidadePreferencia ──────────────────────────────────────────
+@Composable
+fun ScreenDisponibilidadePreferencia(onBack: () -> Unit) {
+    val context  = LocalContext.current
+    val userName = MiauGendaApp.getTokenManager(context).getUserName() ?: "Xavier"
+
+    val today        = remember { LocalDate.now() }
+    var displayMonth by remember { mutableStateOf(YearMonth.now()) }
+    var selectedDate by remember { mutableStateOf(today) }
+    val prefs        = remember { mutableStateMapOf<LocalDate, List<AvailabilityPref>>() }
+    var adicionandoPara by remember { mutableStateOf<LocalDate?>(null) }
+
+    // Navegação interna: mostrar formulário de adição
+    adicionandoPara?.let { dataAlvo ->
+        AdicionarDisponibilidadeScreen(
+            userName = userName,
+            data     = dataAlvo,
+            onSave   = { pref ->
+                prefs[dataAlvo] = (prefs[dataAlvo] ?: emptyList()) + pref
+                adicionandoPara = null
+            },
+            onCancel = { adicionandoPara = null }
+        )
+        return
+    }
+
+    // Células do calendário
+    val firstOfMonth = remember(displayMonth) { displayMonth.atDay(1) }
+    val daysInMonth  = remember(displayMonth) { displayMonth.lengthOfMonth() }
+    val startOffset  = remember(firstOfMonth) { firstOfMonth.dayOfWeek.value - 1 } // 0=Seg
+    val prevMonth    = remember(displayMonth) { displayMonth.minusMonths(1) }
+    val prevDays     = remember(prevMonth) { prevMonth.lengthOfMonth() }
+
+    val cells = remember(displayMonth) {
+        val list = mutableListOf<LocalDate>()
+        for (i in startOffset downTo 1) list.add(prevMonth.atDay(prevDays - i + 1))
+        for (d in 1..daysInMonth) list.add(displayMonth.atDay(d))
+        val nextMonth = displayMonth.plusMonths(1)
+        var nd = 1
+        while (list.size % 7 != 0) list.add(nextMonth.atDay(nd++))
+        list
+    }
+
+    val listDates = remember(selectedDate) { (0..27).map { selectedDate.plusDays(it.toLong()) } }
+
+    Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
+        // Cabeçalho
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(modifier = Modifier.clip(CircleShape).clickable { onBack() }.padding(4.dp)) {
+                Icon(Icons.Filled.ArrowBack, null, tint = Color.White, modifier = Modifier.size(22.dp))
+            }
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("A Minha Disponibilidade", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Icon(Icons.Outlined.KeyboardArrowUp, null, tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+            Box(
+                modifier = Modifier.size(36.dp).clip(CircleShape)
+                    .border(1.5.dp, Blue, CircleShape)
+                    .clickable { displayMonth = YearMonth.now(); selectedDate = today },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Outlined.Schedule, null, tint = Blue, modifier = Modifier.size(18.dp))
+            }
+        }
+
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            // Calendário
+            item {
+                Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+                    // Navegação de mês
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { displayMonth = displayMonth.minusMonths(1) }) {
+                            Icon(Icons.Outlined.ChevronLeft, null, tint = Color.White)
+                        }
+                        Text(
+                            displayMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale("pt", "PT")))
+                                .replaceFirstChar { it.uppercase() },
+                            color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold
+                        )
+                        IconButton(onClick = { displayMonth = displayMonth.plusMonths(1) }) {
+                            Icon(Icons.Outlined.ChevronRight, null, tint = Color.White)
+                        }
+                    }
+
+                    // Cabeçalho dias da semana
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        listOf("Seg","Ter","Qua","Qui","Sex","Sáb","Dom").forEach { label ->
+                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                Text(label, color = TxtGray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+
+                    // Grelha do calendário
+                    cells.chunked(7).forEach { week ->
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            week.forEach { date ->
+                                val isCurrentMonth = date.month == displayMonth.month
+                                val isToday    = date == today
+                                val isSelected = date == selectedDate
+                                val hasPref    = prefs[date]?.isNotEmpty() == true
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1f)
+                                        .clickable {
+                                            selectedDate = date
+                                            if (!isCurrentMonth) displayMonth = YearMonth.from(date)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    // Círculo de fundo
+                                    if (isSelected) {
+                                        Box(modifier = Modifier.size(34.dp).clip(CircleShape).background(Blue))
+                                    } else if (isToday) {
+                                        Box(modifier = Modifier.size(34.dp).clip(CircleShape).background(Color(0xFF1A2540)))
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            date.dayOfMonth.toString(),
+                                            color = when {
+                                                !isCurrentMonth -> TxtGray.copy(alpha = 0.3f)
+                                                isSelected || isToday -> Color.White
+                                                else -> Color.White
+                                            },
+                                            fontSize = 14.sp,
+                                            fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                        if (hasPref) {
+                                            Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(DkGreen))
+                                        } else {
+                                            Spacer(Modifier.height(4.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+            }
+
+            // Lista de dias a partir da data selecionada
+            listDates.forEach { date ->
+                val dayPrefs = prefs[date] ?: emptyList()
+                val isHighlighted = date == selectedDate
+                val dateFmt = DateTimeFormatter.ofPattern("EEE, dd MMM", Locale("pt", "PT"))
+
+                item(key = date.toString()) {
+                    // Cabeçalho do dia
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .background(if (isHighlighted) Color(0xFF0D1420) else DkBg)
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            date.format(dateFmt).replaceFirstChar { it.uppercase() },
+                            color = if (isHighlighted) Blue else TxtGray,
+                            fontSize = 14.sp,
+                            fontWeight = if (isHighlighted) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                        Box(
+                            modifier = Modifier.size(28.dp).clip(CircleShape).clickable { adicionandoPara = date },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Filled.Add, null, tint = Blue, modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    // Conteúdo do dia
+                    if (dayPrefs.isEmpty()) {
+                        Text(
+                            "Sem preferências definidas",
+                            color = Color.White, fontSize = 15.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+                        )
+                    } else {
+                        dayPrefs.forEach { pref ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable {}
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    Box(
+                                        modifier = Modifier.size(18.dp).clip(CircleShape)
+                                            .background(if (pref.tipo == "PREFERIDA") DkGreen else TxtGray)
+                                    )
+                                    Column {
+                                        Text(
+                                            if (pref.tipo == "PREFERIDA") "Preferida" else "Indisponível",
+                                            color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            if (pref.diaInteiro) "Dia Inteiro" else if (pref.nota.isNotEmpty()) pref.nota else "Dia Inteiro",
+                                            color = TxtGray, fontSize = 13.sp
+                                        )
+                                    }
+                                }
+                                Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.06f)))
+                }
+            }
+        }
+    }
+}
+
+// ── AdicionarDisponibilidadeScreen ────────────────────────────────────────────
+@Composable
+fun AdicionarDisponibilidadeScreen(
+    userName: String,
+    data: LocalDate,
+    onSave: (AvailabilityPref) -> Unit,
+    onCancel: () -> Unit
+) {
+    val dateFmt  = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy", Locale("pt", "PT"))
+    var tipo     by remember { mutableStateOf("INDISPONIVEL") }
+    var diaInteiro by remember { mutableStateOf(true) }
+    var nota     by remember { mutableStateOf("") }
+
+    Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
+        // Barra de topo
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = onCancel) { Text("Cancelar", color = Blue, fontSize = 16.sp) }
+            Text(
+                "Adicionar Disponibilidade",
+                color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = { onSave(AvailabilityPref(tipo, diaInteiro, nota)) }) {
+                Text("Guardar", color = Blue, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            // Funcionário
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Funcionário", color = Color.White, fontSize = 15.sp)
+                    Text(userName, color = TxtGray, fontSize = 15.sp)
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+            }
+
+            // Botões de rádio: tipo de preferência
+            item {
+                Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { tipo = "INDISPONIVEL" }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        RadioButton(
+                            selected = tipo == "INDISPONIVEL",
+                            onClick  = { tipo = "INDISPONIVEL" },
+                            colors   = RadioButtonDefaults.colors(selectedColor = TxtGray, unselectedColor = TxtGray)
+                        )
+                        Text("Indisponível para trabalhar", color = Color.White, fontSize = 15.sp)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { tipo = "PREFERIDA" }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        RadioButton(
+                            selected = tipo == "PREFERIDA",
+                            onClick  = { tipo = "PREFERIDA" },
+                            colors   = RadioButtonDefaults.colors(selectedColor = DkGreen, unselectedColor = DkGreen)
+                        )
+                        Text("Preferência para trabalhar", color = Color.White, fontSize = 15.sp)
+                    }
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+            }
+
+            // Dia Inteiro
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Dia Inteiro", color = Color.White, fontSize = 15.sp)
+                    Switch(
+                        checked = diaInteiro, onCheckedChange = { diaInteiro = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Blue)
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+            }
+
+            // Hora de Início
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Hora de Início", color = Color.White, fontSize = 15.sp)
+                    Text(
+                        data.format(dateFmt).replaceFirstChar { it.uppercase() },
+                        color = TxtGray, fontSize = 14.sp
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+            }
+
+            // Hora de Fim
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Hora de Fim", color = Color.White, fontSize = 15.sp)
+                    Text(
+                        data.format(dateFmt).replaceFirstChar { it.uppercase() },
+                        color = TxtGray, fontSize = 14.sp
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+            }
+
+            // Repetir
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable {}
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Repetir", color = Color.White, fontSize = 15.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Não repete", color = TxtGray, fontSize = 14.sp)
+                        Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(16.dp))
+                    }
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+            }
+
+            // Nota
+            item {
+                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    BasicTextField(
+                        value = nota,
+                        onValueChange = { nota = it },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                        textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 15.sp),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Blue),
+                        decorationBox = { inner ->
+                            if (nota.isEmpty()) Text("Nota", color = TxtGray.copy(alpha = 0.55f), fontSize = 15.sp)
+                            inner()
+                        }
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+            }
+
+            // Caixa informativa
+            item {
+                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Outlined.Info, null, tint = TxtGray, modifier = Modifier.size(18.dp).padding(top = 2.dp))
+                        Text(
+                            "Para indisponibilidades por férias, doença, etc., submeta um pedido de férias.",
+                            color = TxtGray, fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── WheelPickerDash ───────────────────────────────────────────────────────────
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun WheelPickerDash(
+    values: List<String>,
+    selectedIndex: Int,
+    onIndexChange: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val itemH = 42.dp
+    val pad = 2
+    val padded = remember(values) { List(pad) { "" } + values + List(pad) { "" } }
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
+    val snap  = rememberSnapFlingBehavior(state)
+    LaunchedEffect(selectedIndex) {
+        if (!state.isScrollInProgress) state.scrollToItem(selectedIndex)
+    }
+    Box(modifier = modifier.height(itemH * (pad * 2 + 1))) {
+        Box(
+            modifier = Modifier.align(Alignment.Center).fillMaxWidth().height(itemH)
+                .background(Color.White.copy(alpha = 0.09f), RoundedCornerShape(8.dp))
+        )
+        LazyColumn(state = state, flingBehavior = snap, modifier = Modifier.fillMaxSize()) {
+            items(padded.size) { i ->
+                val sel by remember { derivedStateOf { state.firstVisibleItemIndex + pad == i } }
+                Box(Modifier.fillMaxWidth().height(itemH), contentAlignment = Alignment.Center) {
+                    if (padded[i].isNotEmpty()) {
+                        Text(
+                            padded[i],
+                            color = if (sel) Color.White else TxtGray.copy(alpha = 0.35f),
+                            fontSize = if (sel) 22.sp else 16.sp,
+                            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        }
+    }
+    LaunchedEffect(state.isScrollInProgress) {
+        if (!state.isScrollInProgress) {
+            val idx = state.firstVisibleItemIndex.coerceIn(0, values.size - 1)
+            if (idx != selectedIndex) onIndexChange(idx)
+        }
+    }
+}
+
+// ── DatePickerRow ─────────────────────────────────────────────────────────────
+@Composable
+private fun DatePickerRow(
+    label: String,
+    date: LocalDate,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onDateChange: (LocalDate) -> Unit
+) {
+    val months = listOf(
+        "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+        "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
+    )
+    val years = (2025..2030).map { it.toString() }
+
+    var dayIdx   by remember(date) { mutableIntStateOf(date.dayOfMonth - 1) }
+    var monthIdx by remember(date) { mutableIntStateOf(date.monthValue - 1) }
+    var yearIdx  by remember(date) { mutableIntStateOf(years.indexOf(date.year.toString()).coerceAtLeast(0)) }
+
+    val daysInMonth = remember(monthIdx, yearIdx) {
+        val y = years.getOrNull(yearIdx)?.toIntOrNull() ?: 2026
+        YearMonth.of(y, (monthIdx + 1).coerceIn(1, 12)).lengthOfMonth()
+    }
+    val days = remember(daysInMonth) { (1..daysInMonth).map { "%02d".format(it) } }
+    val safeDayIdx = dayIdx.coerceIn(0, daysInMonth - 1)
+
+    LaunchedEffect(safeDayIdx, monthIdx, yearIdx) {
+        val y = years.getOrNull(yearIdx)?.toIntOrNull() ?: 2026
+        val m = (monthIdx + 1).coerceIn(1, 12)
+        val d = (safeDayIdx + 1).coerceIn(1, daysInMonth)
+        runCatching { onDateChange(LocalDate.of(y, m, d)) }
+    }
+
+    val dateLbl = remember(date) {
+        date.format(DateTimeFormatter.ofPattern("EEE, d 'de' MMMM yyyy", Locale("pt", "PT")))
+            .replaceFirstChar { it.uppercase() }
+    }
+
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable { onToggle() }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, color = Color.White, fontSize = 15.sp)
+            Box(
+                modifier = if (expanded)
+                    Modifier.clip(RoundedCornerShape(8.dp)).background(Blue.copy(alpha = 0.2f)).padding(horizontal = 10.dp, vertical = 4.dp)
+                else Modifier
+            ) {
+                Text(dateLbl, color = if (expanded) Blue else Color.White.copy(alpha = 0.7f), fontSize = 15.sp)
+            }
+        }
+        if (expanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                WheelPickerDash(values = days,   selectedIndex = safeDayIdx, onIndexChange = { dayIdx   = it }, modifier = Modifier.weight(1f))
+                WheelPickerDash(values = months, selectedIndex = monthIdx,   onIndexChange = { monthIdx = it }, modifier = Modifier.weight(2.2f))
+                WheelPickerDash(values = years,  selectedIndex = yearIdx,    onIndexChange = { yearIdx  = it }, modifier = Modifier.weight(1.5f))
+            }
+        }
+    }
+}
+
+// ── PedidoFeriasScreen ────────────────────────────────────────────────────────
+@Composable
+private fun PedidoFeriasScreen(userName: String, onBack: () -> Unit) {
+    val today = LocalDate.now()
+    var fromDate     by remember { mutableStateOf(today) }
+    var toDate       by remember { mutableStateOf(today) }
+    var diaInteiro   by remember { mutableStateOf(true) }
+    var motivo       by remember { mutableStateOf("") }
+    var expandedField by remember { mutableStateOf<String?>(null) }
+    var bannerMsg    by remember { mutableStateOf<String?>(null) }
+
+    val totalDias = remember(fromDate, toDate) {
+        if (!toDate.isBefore(fromDate)) ChronoUnit.DAYS.between(fromDate, toDate) + 1L else 1L
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(DkBg)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Barra de topo
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onBack) { Text("Cancelar", color = Blue, fontSize = 16.sp) }
+                Text("Novo Pedido de Férias", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                TextButton(onClick = { bannerMsg = "Pedido de férias enviado com sucesso" }) {
+                    Text("Criar", color = Blue, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+
+            LazyColumn(modifier = Modifier.weight(1f)) {
+                // Funcionário
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Funcionário", color = Color.White, fontSize = 15.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(userName, color = TxtGray, fontSize = 15.sp)
+                            Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+                }
+
+                // Dia Inteiro
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Dia Inteiro", color = Color.White, fontSize = 15.sp)
+                        Switch(
+                            checked = diaInteiro,
+                            onCheckedChange = { diaInteiro = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Blue)
+                        )
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+                }
+
+                // De
+                item {
+                    DatePickerRow(
+                        label = "De",
+                        date = fromDate,
+                        expanded = expandedField == "from",
+                        onToggle = { expandedField = if (expandedField == "from") null else "from" },
+                        onDateChange = { d -> fromDate = d; if (toDate.isBefore(d)) toDate = d }
+                    )
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+                }
+
+                // Até
+                item {
+                    DatePickerRow(
+                        label = "Até",
+                        date = toDate,
+                        expanded = expandedField == "to",
+                        onToggle = { expandedField = if (expandedField == "to") null else "to" },
+                        onDateChange = { d -> toDate = if (!d.isBefore(fromDate)) d else fromDate }
+                    )
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+                }
+
+                // Dias Totais
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Dias Totais", color = Color.White, fontSize = 15.sp)
+                        Text("$totalDias dia${if (totalDias != 1L) "s" else ""}", color = TxtGray, fontSize = 15.sp)
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+                }
+
+                // Motivo
+                item {
+                    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        BasicTextField(
+                            value = motivo,
+                            onValueChange = { motivo = it },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 15.sp),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(Blue),
+                            decorationBox = { inner ->
+                                if (motivo.isEmpty()) Text("Motivo", color = TxtGray.copy(alpha = 0.55f), fontSize = 15.sp)
+                                inner()
+                            }
+                        )
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+                }
+            }
+        }
+
+        // Banner de sucesso
+        bannerMsg?.let { msg ->
+            LaunchedEffect(msg) { delay(2800); bannerMsg = null; onBack() }
+            Box(
+                modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)
+                    .padding(top = 70.dp, start = 16.dp, end = 16.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DkGreen)
+                    .pointerInput(msg) { detectVerticalDragGestures { _, d -> if (d < -20f) bannerMsg = null } }
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.CheckCircle, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    Text(msg, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+// ── PedidoTrocaScreen ─────────────────────────────────────────────────────────
+@Composable
+private fun PedidoTrocaScreen(myShifts: List<Shift>, onBack: () -> Unit) {
+    var selectedMyShift        by remember { mutableStateOf<Shift?>(null) }
+    var selectedColleagueShift by remember { mutableStateOf<Shift?>(null) }
+    var showMyPicker           by remember { mutableStateOf(false) }
+    var showColleaguePicker    by remember { mutableStateOf(false) }
+    var motivo                 by remember { mutableStateOf("") }
+    var bannerMsg              by remember { mutableStateOf<String?>(null) }
+
+    val dateFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale("pt", "PT"))
+    fun shiftLabel(s: Shift): String {
+        val d = runCatching { LocalDate.parse(s.date.substring(0, 10)).format(dateFmt) }.getOrDefault("")
+        return "${s.resolvedName()} — $d ${s.resolvedStartTime()}-${s.resolvedEndTime()}"
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(DkBg)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Barra de topo
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onBack) { Text("Cancelar", color = Blue, fontSize = 16.sp) }
+                Text("Novo Pedido de Troca", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                TextButton(
+                    onClick = { if (selectedMyShift != null && selectedColleagueShift != null) bannerMsg = "Pedido de troca enviado com sucesso" },
+                    enabled = selectedMyShift != null && selectedColleagueShift != null
+                ) {
+                    Text(
+                        "Criar",
+                        color = if (selectedMyShift != null && selectedColleagueShift != null) Blue else TxtGray,
+                        fontSize = 16.sp, fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+
+            // Caixa de informação
+            Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF111827)).padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(Icons.Outlined.Info, null, tint = TxtGray, modifier = Modifier.size(18.dp).padding(top = 1.dp))
+                    Text(
+                        "Selecione o seu turno e o turno do colega que pretende trocar. Ambos os turnos têm de estar publicados.",
+                        color = TxtGray, fontSize = 13.sp
+                    )
+                }
+            }
+
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+
+            // Meu Turno
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { showMyPicker = true }
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("Meu Turno", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        selectedMyShift?.let { shiftLabel(it) } ?: "Toque para selecionar",
+                        color = if (selectedMyShift != null) Blue else TxtGray,
+                        fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(20.dp))
+            }
+
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+
+            // Separador com ícone de troca
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier.size(40.dp).clip(CircleShape).background(DkSurface2),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.SwapVert, null, tint = TxtGray, modifier = Modifier.size(22.dp))
+                }
+            }
+
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+
+            // Turno do Colega
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { showColleaguePicker = true }
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("Turno do Colega", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        selectedColleagueShift?.let { shiftLabel(it) } ?: "Toque para selecionar",
+                        color = if (selectedColleagueShift != null) Blue else TxtGray,
+                        fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(20.dp))
+            }
+
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+
+            // Motivo
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+                Text("Motivo", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(DkSurface2)
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                ) {
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = motivo,
+                        onValueChange = { motivo = it },
+                        textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Blue),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp),
+                        decorationBox = { inner ->
+                            if (motivo.isEmpty()) {
+                                Text("Descreva o motivo da troca (opcional)...", color = TxtGray, fontSize = 14.sp)
+                            }
+                            inner()
+                        }
+                    )
+                }
+            }
+
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+        }
+
+        // Picker — Meu Turno
+        if (showMyPicker) {
+            TurnoPickerOverlay(
+                title = "Selecionar o Meu Turno",
+                shifts = myShifts,
+                mensagemVazia = "Não tem turnos publicados disponíveis.",
+                onSelect = { selectedMyShift = it; showMyPicker = false },
+                onDismiss = { showMyPicker = false }
+            )
+        }
+
+        // Picker — Turno do Colega
+        if (showColleaguePicker) {
+            TurnoPickerOverlay(
+                title = "Selecionar Turno do Colega",
+                shifts = emptyList(),
+                mensagemVazia = "O carregamento de turnos de colegas\nserá implementado em breve.",
+                onSelect = { selectedColleagueShift = it; showColleaguePicker = false },
+                onDismiss = { showColleaguePicker = false }
+            )
+        }
+
+        // Banner de sucesso
+        bannerMsg?.let { msg ->
+            LaunchedEffect(msg) { delay(2800); bannerMsg = null; onBack() }
+            Box(
+                modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)
+                    .padding(top = 70.dp, start = 16.dp, end = 16.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DkGreen)
+                    .pointerInput(msg) { detectVerticalDragGestures { _, d -> if (d < -20f) bannerMsg = null } }
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.CheckCircle, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    Text(msg, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+// ── TurnoPickerOverlay ────────────────────────────────────────────────────────
+@Composable
+private fun TurnoPickerOverlay(
+    title: String,
+    shifts: List<Shift>,
+    mensagemVazia: String,
+    onSelect: (Shift) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val dateFmt = DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale("pt", "PT"))
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)).clickable { onDismiss() },
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(DkSurface)
+                .clickable {}
+                .padding(top = 16.dp, bottom = 32.dp)
+        ) {
+            Text(
+                title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp)
+            )
+            DkDivider()
+            if (shifts.isEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
+                    Text(mensagemVazia, color = TxtGray, fontSize = 14.sp, textAlign = TextAlign.Center)
+                }
+            } else {
+                LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                    items(shifts) { shift ->
+                        val d = runCatching { LocalDate.parse(shift.date.substring(0, 10)).format(dateFmt) }.getOrDefault("")
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onSelect(shift) }
+                                .padding(horizontal = 20.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(shift.resolvedName(), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                Text("$d  •  ${shift.resolvedStartTime()} - ${shift.resolvedEndTime()}", color = TxtGray, fontSize = 13.sp)
+                            }
+                            Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(16.dp))
+                        }
+                        DkDivider()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── PedidosEnviadosSection ────────────────────────────────────────────────────
+@Composable
+private fun PedidosEnviadosSection() {
+    // TODO: substituir por dados reais do backend
+    Box(
+        modifier = Modifier
+            .padding(horizontal = 14.dp)
+            .padding(bottom = 22.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(DkSurface),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)) {
+            Icon(
+                Icons.Outlined.Inbox,
+                contentDescription = null,
+                tint = TxtGray,
+                modifier = Modifier.size(32.dp).align(Alignment.CenterHorizontally)
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Sem pedidos enviados",
+                color = TxtGray, fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                "Os seus pedidos de férias e trocas aparecerão aqui.",
+                color = TxtGray.copy(alpha = 0.6f), fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            )
+        }
     }
 }
 

@@ -91,7 +91,8 @@ fun NotificationsScreen(
     managerName: String = "Xavier Bolotinha",
     onNavigateToScheduler: () -> Unit = {},
     onNavigateToHome: () -> Unit = {},
-    onNavigateToInbox: () -> Unit = {}
+    onNavigateToInbox: () -> Unit = {},
+    onNavigateToEquipa: () -> Unit = {}
 ) {
     var notifications by remember { mutableStateOf(initialNotifications) }
     var detailItemId by remember { mutableStateOf<Int?>(null) }
@@ -149,7 +150,8 @@ fun NotificationsScreen(
                 notificationCount    = pendingCount,
                 onHomeClick          = onNavigateToHome,
                 onSchedulerClick     = onNavigateToScheduler,
-                onInboxClick         = onNavigateToInbox
+                onInboxClick         = onNavigateToInbox,
+                onMenuClick          = onNavigateToEquipa
             )
         }
 
