@@ -76,7 +76,8 @@ private val members = listOf(
 fun InboxScreen(
     onSchedulerClick: () -> Unit = {},
     onNotificationsClick: () -> Unit = {},
-    onHomeClick: () -> Unit = {}
+    onHomeClick: () -> Unit = {},
+    onEquipaClick: () -> Unit = {}
 ) {
     var screen by remember { mutableStateOf<InboxSubScreen>(InboxSubScreen.Main) }
 
@@ -99,7 +100,8 @@ fun InboxScreen(
                 },
                 onSchedulerClick      = onSchedulerClick,
                 onNotificationsClick  = onNotificationsClick,
-                onHomeClick           = onHomeClick
+                onHomeClick           = onHomeClick,
+                onEquipaClick         = onEquipaClick
             )
             is InboxSubScreen.NewChat -> NewChatScreen(
                 onBack        = { screen = InboxSubScreen.Main },
@@ -121,7 +123,8 @@ private fun InboxMain(
     onChannelClick: (Channel) -> Unit,
     onSchedulerClick: () -> Unit,
     onNotificationsClick: () -> Unit,
-    onHomeClick: () -> Unit
+    onHomeClick: () -> Unit,
+    onEquipaClick: () -> Unit = {}
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         // Header
@@ -174,8 +177,10 @@ private fun InboxMain(
             active               = NavTab.INBOX,
             onSchedulerClick     = onSchedulerClick,
             onNotificationsClick = onNotificationsClick,
-            onHomeClick          = onHomeClick
+            onHomeClick          = onHomeClick,
+            onMenuClick          = onEquipaClick
         )
+
     }
 }
 

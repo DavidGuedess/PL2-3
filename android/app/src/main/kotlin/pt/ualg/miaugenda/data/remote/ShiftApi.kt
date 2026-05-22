@@ -18,7 +18,8 @@ interface ShiftApi {
     @GET("/shifts")
     suspend fun getShifts(
         @Query("week") week: String? = null,
-        @Query("month") month: String? = null
+        @Query("month") month: String? = null,
+        @Query("userId") userId: Int? = null
     ): Response<List<Shift>>
 
     @GET("/shifts/me")

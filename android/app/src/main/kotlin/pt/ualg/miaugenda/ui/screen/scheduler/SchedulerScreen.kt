@@ -273,6 +273,7 @@ fun SchedulerScreen(
     onNavigateToHome: () -> Unit = {},
     onNavigateToNotifications: () -> Unit = {},
     onNavigateToInbox: () -> Unit = {},
+    onNavigateToEquipa: () -> Unit = {},
     viewModel: SchedulerViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -417,7 +418,8 @@ fun SchedulerScreen(
                     active               = NavTab.SCHEDULER,
                     onHomeClick          = onNavigateToHome,
                     onNotificationsClick = onNavigateToNotifications,
-                    onInboxClick         = onNavigateToInbox
+                    onInboxClick         = onNavigateToInbox,
+                    onMenuClick          = onNavigateToEquipa
                 )
             }
         }
