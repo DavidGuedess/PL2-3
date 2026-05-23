@@ -16,6 +16,8 @@ object RetrofitClient {
     private var attendanceApiInstance: AttendanceApi? = null
     private var userApiInstance: UserApi? = null
     private var weekAssignmentApiInstance: WeekAssignmentApi? = null
+    private var requestApiInstance: RequestApi? = null
+    private var availabilityApiInstance: AvailabilityApi? = null
     
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = if (BuildConfig.DEBUG) {
@@ -59,6 +61,8 @@ object RetrofitClient {
         attendanceApiInstance = null
         userApiInstance = null
         weekAssignmentApiInstance = null
+        requestApiInstance = null
+        availabilityApiInstance = null
     }
 
     val authApi: AuthApi
@@ -99,5 +103,21 @@ object RetrofitClient {
                 weekAssignmentApiInstance = getRetrofit().create(WeekAssignmentApi::class.java)
             }
             return weekAssignmentApiInstance!!
+        }
+
+    val requestApi: RequestApi
+        get() {
+            if (requestApiInstance == null) {
+                requestApiInstance = getRetrofit().create(RequestApi::class.java)
+            }
+            return requestApiInstance!!
+        }
+
+    val availabilityApi: AvailabilityApi
+        get() {
+            if (availabilityApiInstance == null) {
+                availabilityApiInstance = getRetrofit().create(AvailabilityApi::class.java)
+            }
+            return availabilityApiInstance!!
         }
 }

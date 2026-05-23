@@ -73,7 +73,7 @@ class AttendanceMonitorViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingAttendance = true, error = null)
             try {
-                val response = attendanceApi.getUserAttendance(
+                val response = attendanceApi.getAttendance(
                     userId = user.id,
                     from = state.fromDate,
                     to = state.toDate
