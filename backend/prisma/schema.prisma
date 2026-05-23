@@ -47,6 +47,9 @@ model User {
   shifts             Shift[]
   attendanceRecords  AttendanceRecord[]
   weekAssignments    WeekAssignment[]
+  channelsCreated    Channel[]       @relation("ChannelCreator")
+  channelMembers     ChannelMember[]
+  messages           Message[]
   timeOffRequests    TimeOffRequest[]
   shiftSwapRequests  ShiftSwapRequest[]
   availabilities     Availability[]
@@ -103,6 +106,42 @@ model AttendanceRecord {
 
   @@index([userId])
   @@index([timestamp])
+}
+
+model Channel {
+  id          Int             @id @default(autoincrement())
+  name        String          @unique
+  description String?
+  isPublic    Boolean         @default(true)
+  createdById Int
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  createdBy   User            @relation("ChannelCreator", fields: [createdById], references: [id])
+  members     ChannelMember[]
+  messages    Message[]
+}
+
+model ChannelMember {
+  id        Int      @id @default(autoincrement())
+  channelId Int
+  userId    Int
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime @default(now())
+
+  @@unique([channelId, userId])
+}
+
+model Message {
+  id        Int      @id @default(autoincrement())
+  channelId Int
+  userId    Int
+  content   String
+  createdAt DateTime @default(now())
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, createdAt])
 }
 
 model TokenBlacklist {

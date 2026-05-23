@@ -1052,68 +1052,6 @@ private fun FabMenuItem(label: String, icon: ImageVector, onClick: () -> Unit) {
     }
 }
 
-// ── BottomNav ─────────────────────────────────────────────────────────────────
-@Composable
-private fun BottomNav(activeIndex: Int = 0, onSchedulerClick: () -> Unit = {}) {
-    data class NavItem(val label: String, val icon: ImageVector, val badge: Int, val onClick: () -> Unit)
-
-    val items = listOf(
-        NavItem("Início",        Icons.Outlined.Home,          0) {},
-        NavItem("Agenda",        Icons.Outlined.DateRange,      0, onSchedulerClick),
-        NavItem("Caixa",         Icons.Outlined.Inbox,          1) {},
-        NavItem("Notificações",  Icons.Outlined.Notifications,  2) {},
-        NavItem("Menu",          Icons.Outlined.Menu,           0) {},
-    )
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(DkSurface)
-            .border(width = 1.dp, color = Color.White.copy(alpha = 0.07f), shape = RectangleShape)
-            .pointerInput(Unit) {}
-            .padding(top = 8.dp, bottom = 16.dp),
-        horizontalArrangement = Arrangement.SpaceAround
-    ) {
-        items.forEachIndexed { i, item ->
-            val active = i == activeIndex
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.clickable { item.onClick() }) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Box {
-                        Icon(
-                            if (active && item.label == "Início") Icons.Filled.Home else item.icon,
-                            contentDescription = item.label,
-                            tint = if (active) Blue else TxtGray,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        if (item.badge > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .size(17.dp)
-                                    .clip(CircleShape)
-                                    .background(RedBadge)
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = 4.dp, y = (-4).dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("${item.badge}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
-                            }
-                        }
-                    }
-                    Text(
-                        item.label,
-                        fontSize = 10.sp,
-                        color = if (active) Blue else TxtGray,
-                        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
-                    )
-                }
-            }
-        }
-    }
-}
-
 // ── Componentes partilhados ───────────────────────────────────────────────────
 
 @Composable

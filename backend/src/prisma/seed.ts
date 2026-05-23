@@ -323,6 +323,19 @@ async function main() {
     })
   }
 
+  // ── Canais padrão ───────────────────────────────────────────────────────────
+  await prisma.channel.upsert({
+    where: { name: 'Todos' },
+    update: {},
+    create: { name: 'Todos', description: 'Canal público para todos os funcionários', isPublic: true, createdById: a1.id }
+  })
+
+  await prisma.channel.upsert({
+    where: { name: 'Anúncios' },
+    update: {},
+    create: { name: 'Anúncios', description: 'Para anúncios da gestão', isPublic: true, createdById: a1.id }
+  })
+
   console.log('Seed concluido:')
   console.log('  6 utilizadores | 4 tipos de turno | 25+16 turnos publicados (18-31 Mai 2026)')
   console.log('  16 registos de ponto simulados (pontual / atraso / falta)')

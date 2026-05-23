@@ -88,6 +88,7 @@ fun TeamScreen(
         is TeamSubScreen.List -> TeamListScreen(
             onEmployeeClick = { subScreen = TeamSubScreen.Detail(it) },
             onAddEmployee = { subScreen = TeamSubScreen.AddEmployee },
+            onNavEquipa = { subScreen = TeamSubScreen.List },
             onNavigateToHome = onNavigateToHome,
             onNavigateToScheduler = onNavigateToScheduler,
             onNavigateToInbox = onNavigateToInbox,
@@ -115,6 +116,7 @@ fun TeamScreen(
 private fun TeamListScreen(
     onEmployeeClick: (User) -> Unit,
     onAddEmployee: () -> Unit,
+    onNavEquipa: () -> Unit = {},
     onNavigateToHome: () -> Unit = {},
     onNavigateToScheduler: () -> Unit = {},
     onNavigateToInbox: () -> Unit = {},
@@ -227,7 +229,7 @@ private fun TeamListScreen(
                 onSchedulerClick     = onNavigateToScheduler,
                 onInboxClick         = onNavigateToInbox,
                 onNotificationsClick = onNavigateToNotifications,
-                onMenuClick          = {}
+                onMenuClick          = onNavEquipa
             )
         }
     }
@@ -246,7 +248,10 @@ private fun EmployeeCard(
             .clip(RoundedCornerShape(12.dp))
             .background(
                 Brush.linearGradient(
-                    colors = listOf(cardColor, cardColor.copy(alpha = 0.7f))
+                    colors = listOf(
+                        if (user.active) cardColor else Color(0xFF555555),
+                        if (user.active) cardColor.copy(alpha = 0.7f) else Color(0xFF333333)
+                    )
                 )
             )
             .clickable(onClick = onClick)
@@ -273,6 +278,17 @@ private fun EmployeeCard(
                 .align(Alignment.BottomStart)
                 .padding(8.dp)
         )
+        // Indicador de inativo
+        if (!user.active) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFFF453A))
+            )
+        }
     }
 }
 
@@ -284,6 +300,13 @@ private fun EmployeeDetailScreen(
     onBack: () -> Unit,
     onCalendarClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val isAdmin = MiauGendaApp.getTokenManager(context).getUserRole() == "ADMIN"
+    var isActive by remember { mutableStateOf(user.active) }
+    var isActionLoading by remember { mutableStateOf(false) }
+    var actionMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
     Box(modifier = Modifier.fillMaxSize().background(DkBg)) {
         Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             // Header com gradiente + nome
@@ -376,6 +399,62 @@ private fun EmployeeDetailScreen(
                 InfoRow("Categoria", user.category.lowercase().replaceFirstChar { it.uppercase() })
                 HorizontalDivider(color = DkDivider, thickness = 0.5.dp)
                 InfoRow("Função", user.role.lowercase().replaceFirstChar { it.uppercase() })
+                HorizontalDivider(color = DkDivider, thickness = 0.5.dp)
+                InfoRow("Estado", if (isActive) "Ativo" else "Inativo")
+            }
+
+            // Botão desativar/ativar (apenas ADMIN)
+            if (isAdmin) {
+                Spacer(modifier = Modifier.height(16.dp))
+                actionMessage?.let {
+                    Text(
+                        text = it,
+                        color = if (it.startsWith("Erro")) Color(0xFFFF453A) else DkGreen,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                Button(
+                    onClick = {
+                        scope.launch {
+                            isActionLoading = true
+                            actionMessage = null
+                            try {
+                                val resp = if (isActive) {
+                                    RetrofitClient.userApi.deactivateUser(user.id)
+                                } else {
+                                    RetrofitClient.userApi.activateUser(user.id)
+                                }
+                                if (resp.isSuccessful) {
+                                    isActive = !isActive
+                                    actionMessage = if (isActive) "Utilizador reativado" else "Utilizador desativado"
+                                } else {
+                                    actionMessage = "Erro (${resp.code()})"
+                                }
+                            } catch (e: Exception) {
+                                actionMessage = "Erro: ${e.message}"
+                            } finally {
+                                isActionLoading = false
+                            }
+                        }
+                    },
+                    enabled = !isActionLoading,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isActive) Color(0xFFFF453A) else DkGreen,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = if (isActionLoading) "A processar..." else if (isActive) "Desativar Conta" else "Reativar Conta",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(modifier = Modifier.height(32.dp))
             }
         }
     }

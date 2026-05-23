@@ -162,7 +162,6 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
     fun createShift(userId: Int, date: String, startTime: String, endTime: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             try {
-                android.util.Log.d("SHIFT_DEBUG", "createShift: userId=$userId date=$date start=$startTime end=$endTime")
                 val r = RetrofitClient.shiftApi.createShift(
                     CreateShiftRequest(userId = userId, date = date, startTime = startTime, endTime = endTime)
                 )
@@ -171,7 +170,6 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
                     onResult(true, "Turno criado como rascunho")
                 } else {
                     val body = r.errorBody()?.string()
-                    android.util.Log.d("SHIFT_DEBUG", "createShift error ${r.code()}: $body")
                     onResult(false, when (r.code()) {
                         409 -> parseApiError(body, "Conflito de horario com turno existente")
                         403 -> "Sem permissao para criar turnos"
@@ -187,7 +185,6 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateShift(shiftId: Int, date: String? = null, startTime: String? = null, endTime: String? = null, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             try {
-                android.util.Log.d("SHIFT_DEBUG", "updateShift: id=$shiftId date=$date start=$startTime end=$endTime")
                 val r = RetrofitClient.shiftApi.updateShift(
                     shiftId, UpdateShiftRequest(startTime = startTime, endTime = endTime, date = date)
                 )
@@ -196,7 +193,6 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
                     onResult(true, "Turno atualizado com sucesso")
                 } else {
                     val body = r.errorBody()?.string()
-                    android.util.Log.d("SHIFT_DEBUG", "updateShift error ${r.code()}: $body")
                     onResult(false, when (r.code()) {
                         409 -> parseApiError(body, "Conflito de horario com turno existente")
                         404 -> "Turno nao encontrado"

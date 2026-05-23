@@ -16,6 +16,7 @@ object RetrofitClient {
     private var attendanceApiInstance: AttendanceApi? = null
     private var userApiInstance: UserApi? = null
     private var weekAssignmentApiInstance: WeekAssignmentApi? = null
+    private var messagingApiInstance: MessagingApi? = null
     private var requestApiInstance: RequestApi? = null
     private var availabilityApiInstance: AvailabilityApi? = null
     
@@ -41,6 +42,7 @@ object RetrofitClient {
         return builder.build()
     }
 
+    @Synchronized
     private fun getRetrofit(): Retrofit {
         if (retrofitInstance == null) {
             retrofitInstance = Retrofit.Builder()
@@ -61,6 +63,7 @@ object RetrofitClient {
         attendanceApiInstance = null
         userApiInstance = null
         weekAssignmentApiInstance = null
+        messagingApiInstance = null
         requestApiInstance = null
         availabilityApiInstance = null
     }
@@ -103,6 +106,14 @@ object RetrofitClient {
                 weekAssignmentApiInstance = getRetrofit().create(WeekAssignmentApi::class.java)
             }
             return weekAssignmentApiInstance!!
+        }
+
+    val messagingApi: MessagingApi
+        get() {
+            if (messagingApiInstance == null) {
+                messagingApiInstance = getRetrofit().create(MessagingApi::class.java)
+            }
+            return messagingApiInstance!!
         }
 
     val requestApi: RequestApi
