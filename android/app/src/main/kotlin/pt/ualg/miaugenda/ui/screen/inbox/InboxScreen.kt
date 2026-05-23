@@ -33,10 +33,12 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import pt.ualg.miaugenda.MiauGendaApp
+import kotlinx.coroutines.async
 import pt.ualg.miaugenda.data.model.Channel
 import pt.ualg.miaugenda.data.model.ChannelMessage
 import pt.ualg.miaugenda.data.model.CreateChannelRequest
 import pt.ualg.miaugenda.data.model.SendMessageRequest
+import pt.ualg.miaugenda.data.model.User
 import pt.ualg.miaugenda.data.remote.RetrofitClient
 import pt.ualg.miaugenda.ui.components.AppBottomNav
 import pt.ualg.miaugenda.ui.components.NavTab
@@ -65,7 +67,7 @@ private val avatarColors = listOf(
 
 private sealed class InboxSubScreen {
     object Main : InboxSubScreen()
-    object NewChat : InboxSubScreen()
+    object BrowseChannels : InboxSubScreen()
     data class ChatRoom(val channelId: Int, val channelName: String) : InboxSubScreen()
 }
 
@@ -91,18 +93,18 @@ fun InboxScreen(
         when (val s = screen) {
             is InboxSubScreen.Main -> InboxMain(
                 currentUserId        = currentUserId,
-                onNewChat            = { screen = InboxSubScreen.NewChat },
+                onBrowse             = { screen = InboxSubScreen.BrowseChannels },
                 onChannelClick       = { channel -> screen = InboxSubScreen.ChatRoom(channel.id, channel.name) },
                 onSchedulerClick     = onSchedulerClick,
                 onNotificationsClick = onNotificationsClick,
                 onHomeClick          = onHomeClick,
                 onEquipaClick        = onEquipaClick
             )
-            is InboxSubScreen.NewChat -> NewChatScreen(
+            is InboxSubScreen.BrowseChannels -> BrowseChannelsScreen(
                 currentUserId    = currentUserId,
                 currentUserRole  = currentUserRole,
                 onBack           = { screen = InboxSubScreen.Main },
-                onSelectChannel  = { channel -> screen = InboxSubScreen.ChatRoom(channel.id, channel.name) }
+                onSelectChannel  = { channel, displayName -> screen = InboxSubScreen.ChatRoom(channel.id, displayName) }
             )
             is InboxSubScreen.ChatRoom -> ChatRoomScreen(
                 channelId     = s.channelId,
@@ -119,7 +121,7 @@ fun InboxScreen(
 @Composable
 private fun InboxMain(
     currentUserId: Int,
-    onNewChat: () -> Unit,
+    onBrowse: () -> Unit,
     onChannelClick: (Channel) -> Unit,
     onSchedulerClick: () -> Unit,
     onNotificationsClick: () -> Unit,
@@ -160,10 +162,10 @@ private fun InboxMain(
         ) {
             Text("Caixa", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
             Box(
-                modifier = Modifier.size(36.dp).clip(CircleShape).background(Blue).clickable { onNewChat() },
+                modifier = Modifier.size(36.dp).clip(CircleShape).background(Blue).clickable { onBrowse() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Outlined.Add, contentDescription = "Novo canal", tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(Icons.Outlined.Add, contentDescription = "Procurar", tint = Color.White, modifier = Modifier.size(20.dp))
             }
         }
 
@@ -197,6 +199,25 @@ private fun InboxMain(
                     Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 80.dp).background(Color.White.copy(alpha = 0.07f)))
                 }
             }
+        }
+
+        // Linha "Outros" — sempre visível
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable { onBrowse() }.padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Box(
+                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF1C1C3A)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Outlined.Search, contentDescription = null, tint = Blue, modifier = Modifier.size(26.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Outros", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text("Procurar canais ou enviar mensagem privada", color = TxtGray, fontSize = 13.sp, maxLines = 1)
+            }
+            Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
         }
 
         AppBottomNav(
@@ -248,37 +269,58 @@ private fun ChannelRow(channel: Channel, onClick: () -> Unit) {
     }
 }
 
-// ── Novo Chat ─────────────────────────────────────────────────────────────────
+// ── Procurar Canais / Mensagem Privada ────────────────────────────────────────
+
+private suspend fun findOrCreateDmChannel(currentUserId: Int, targetUserId: Int): Channel? {
+    val dmName = "dm-${minOf(currentUserId, targetUserId)}-${maxOf(currentUserId, targetUserId)}"
+    val createResp = RetrofitClient.messagingApi.createChannel(
+        CreateChannelRequest(name = dmName, description = null, isPublic = false)
+    )
+    if (createResp.isSuccessful) return createResp.body()
+    if (createResp.code() == 409) {
+        val allResp = RetrofitClient.messagingApi.getChannels()
+        if (allResp.isSuccessful) return allResp.body()?.find { it.name == dmName }
+    }
+    return null
+}
 
 @Composable
-private fun NewChatScreen(
+private fun BrowseChannelsScreen(
     currentUserId: Int,
     currentUserRole: String,
     onBack: () -> Unit,
-    onSelectChannel: (Channel) -> Unit
+    onSelectChannel: (Channel, String) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     var channels by remember { mutableStateOf<List<Channel>>(emptyList()) }
+    var users by remember { mutableStateOf<List<User>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var newChannelName by remember { mutableStateOf("") }
     var newChannelDesc by remember { mutableStateOf("") }
     var isCreating by remember { mutableStateOf(false) }
     var createError by remember { mutableStateOf<String?>(null) }
+    var openingDm by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val canCreate = currentUserRole == "ADMIN" || currentUserRole == "MANAGER"
 
     LaunchedEffect(Unit) {
         try {
-            val resp = RetrofitClient.messagingApi.getChannels()
-            if (resp.isSuccessful) channels = resp.body().orEmpty()
+            val chDeferred = scope.async { RetrofitClient.messagingApi.getChannels() }
+            val usDeferred = scope.async { RetrofitClient.userApi.getUsers() }
+            val chR = chDeferred.await()
+            val usR = usDeferred.await()
+            if (chR.isSuccessful) channels = chR.body().orEmpty()
+            if (usR.isSuccessful) users = usR.body().orEmpty().filter { it.id != currentUserId }
         } catch (_: Exception) {}
         isLoading = false
     }
 
     val filteredChannels = remember(channels, query) {
-        if (query.isBlank()) channels
-        else channels.filter { it.name.contains(query, ignoreCase = true) }
+        if (query.isBlank()) channels else channels.filter { it.name.contains(query, ignoreCase = true) }
+    }
+    val filteredUsers = remember(users, query) {
+        if (query.isBlank()) users else users.filter { it.name.contains(query, ignoreCase = true) }
     }
 
     if (showCreateDialog) {
@@ -289,26 +331,20 @@ private fun NewChatScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
-                        value = newChannelName,
-                        onValueChange = { newChannelName = it },
-                        label = { Text("Nome do canal", color = TxtGray) },
-                        singleLine = true,
+                        value = newChannelName, onValueChange = { newChannelName = it },
+                        label = { Text("Nome do canal", color = TxtGray) }, singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Blue, unfocusedBorderColor = DkSurface2,
                             focusedTextColor = Color.White, unfocusedTextColor = Color.White
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                        ), modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
-                        value = newChannelDesc,
-                        onValueChange = { newChannelDesc = it },
-                        label = { Text("Descrição (opcional)", color = TxtGray) },
-                        singleLine = true,
+                        value = newChannelDesc, onValueChange = { newChannelDesc = it },
+                        label = { Text("Descrição (opcional)", color = TxtGray) }, singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Blue, unfocusedBorderColor = DkSurface2,
                             focusedTextColor = Color.White, unfocusedTextColor = Color.White
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                        ), modifier = Modifier.fillMaxWidth()
                     )
                     createError?.let { Text(it, color = Color(0xFFFF453A), fontSize = 13.sp) }
                 }
@@ -317,36 +353,23 @@ private fun NewChatScreen(
                 TextButton(
                     onClick = {
                         if (newChannelName.isBlank()) return@TextButton
-                        isCreating = true
-                        createError = null
+                        isCreating = true; createError = null
                         scope.launch {
                             try {
                                 val resp = RetrofitClient.messagingApi.createChannel(
-                                    CreateChannelRequest(
-                                        name = newChannelName.trim(),
-                                        description = newChannelDesc.trim().ifBlank { null }
-                                    )
+                                    CreateChannelRequest(name = newChannelName.trim(), description = newChannelDesc.trim().ifBlank { null })
                                 )
                                 if (resp.isSuccessful) {
-                                    resp.body()?.let { onSelectChannel(it) }
-                                    showCreateDialog = false
-                                    newChannelName = ""
-                                    newChannelDesc = ""
-                                } else if (resp.code() == 409) {
-                                    createError = "Já existe um canal com esse nome"
-                                } else {
-                                    createError = "Erro ao criar canal (${resp.code()})"
-                                }
-                            } catch (_: Exception) {
-                                createError = "Sem ligação ao servidor"
-                            }
+                                    resp.body()?.let { onSelectChannel(it, it.name) }
+                                    showCreateDialog = false; newChannelName = ""; newChannelDesc = ""
+                                } else if (resp.code() == 409) createError = "Já existe um canal com esse nome"
+                                else createError = "Erro ao criar canal (${resp.code()})"
+                            } catch (_: Exception) { createError = "Sem ligação ao servidor" }
                             isCreating = false
                         }
                     },
                     enabled = newChannelName.isNotBlank() && !isCreating
-                ) {
-                    Text(if (isCreating) "A criar..." else "Criar", color = Blue)
-                }
+                ) { Text(if (isCreating) "A criar..." else "Criar", color = Blue) }
             },
             dismissButton = {
                 TextButton(onClick = { showCreateDialog = false; createError = null; newChannelName = ""; newChannelDesc = "" }) {
@@ -357,15 +380,18 @@ private fun NewChatScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // Header
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             TextButton(onClick = onBack) { Text("Cancelar", color = Blue, fontSize = 16.sp) }
-            Text("Novo Chat", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+            Text("Procurar Canais", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
             Spacer(Modifier.width(80.dp))
         }
 
+        // Barra de pesquisa
         Box(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
                 .clip(RoundedCornerShape(12.dp)).background(DkSurface)
@@ -374,7 +400,7 @@ private fun NewChatScreen(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Outlined.Search, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
                 Box {
-                    if (query.isEmpty()) Text("Pesquisar canais...", color = TxtGray, fontSize = 15.sp)
+                    if (query.isEmpty()) Text("Pesquisar membros da equipa", color = TxtGray, fontSize = 15.sp)
                     BasicTextField(
                         value = query, onValueChange = { query = it }, singleLine = true,
                         textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
@@ -390,6 +416,7 @@ private fun NewChatScreen(
             }
         } else {
             LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(vertical = 8.dp)) {
+                // Criar novo canal (ADMIN/MANAGER)
                 if (canCreate) {
                     item {
                         Row(
@@ -401,22 +428,23 @@ private fun NewChatScreen(
                             Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(Blue), contentAlignment = Alignment.Center) {
                                 Icon(Icons.Outlined.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
                             }
-                            Text("Criar novo canal", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            Text("Criar novo canal de grupo", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
                             Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
                         }
                         Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 80.dp).background(Color.White.copy(alpha = 0.07f)))
                     }
                 }
 
+                // Secção "Sugeridos" — canais
                 if (filteredChannels.isNotEmpty()) {
                     item {
-                        Text("Canais", color = TxtGray, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        Text("Sugeridos", color = TxtGray, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.fillMaxWidth().background(DkSurface2).padding(horizontal = 20.dp, vertical = 8.dp))
                     }
-                    items(filteredChannels, key = { it.id }) { ch ->
+                    items(filteredChannels, key = { "ch-${it.id}" }) { ch ->
                         val bgColor = channelColors[ch.id % channelColors.size]
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable { onSelectChannel(ch) }
+                            modifier = Modifier.fillMaxWidth().clickable { onSelectChannel(ch, ch.name) }
                                 .padding(horizontal = 20.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -432,11 +460,46 @@ private fun NewChatScreen(
                         }
                         Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 80.dp).background(Color.White.copy(alpha = 0.07f)))
                     }
-                } else if (!canCreate) {
+                }
+
+                // Secção de utilizadores para mensagem privada
+                if (filteredUsers.isNotEmpty()) {
                     item {
-                        Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Text("Sem canais encontrados", color = TxtGray, fontSize = 15.sp, textAlign = TextAlign.Center)
+                        Text("Membros da equipa", color = TxtGray, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.fillMaxWidth().background(DkSurface2).padding(horizontal = 20.dp, vertical = 8.dp))
+                    }
+                    items(filteredUsers, key = { "user-${it.id}" }) { user ->
+                        val color = avatarColors[user.id % avatarColors.size]
+                        Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable(enabled = !openingDm) {
+                                    openingDm = true
+                                    scope.launch {
+                                        try {
+                                            val ch = findOrCreateDmChannel(currentUserId, user.id)
+                                            ch?.let { onSelectChannel(it, user.name) }
+                                        } catch (_: Exception) {}
+                                        openingDm = false
+                                    }
+                                }
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.size(48.dp).clip(CircleShape).background(color),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(user.name.first().uppercaseChar().toString(), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Text(user.name, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            if (openingDm) {
+                                CircularProgressIndicator(color = Blue, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
+                            }
                         }
+                        Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 80.dp).background(Color.White.copy(alpha = 0.07f)))
                     }
                 }
             }

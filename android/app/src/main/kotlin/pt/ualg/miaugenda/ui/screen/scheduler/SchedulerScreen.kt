@@ -686,7 +686,20 @@ private fun SchedulerGrid(
                                         !day.isBefore(s) && !day.isAfter(e)
                                     }.getOrDefault(false)
                                 }
-                                Box(modifier = Modifier.weight(1f).fillMaxHeight().padding(2.dp)) {
+                                val availOutlineColor = when {
+                                    dayAvail?.type == "UNAVAILABLE" -> Color(0xFFE53935)
+                                    dayAvail != null -> DkGreen
+                                    else -> Color.Transparent
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f).fillMaxHeight().padding(2.dp)
+                                        .then(
+                                            if (dayAvail != null)
+                                                Modifier.border(1.5.dp, availOutlineColor, RoundedCornerShape(6.dp))
+                                            else Modifier
+                                        )
+                                ) {
                                     if (hasVacation) {
                                         VacationCell()
                                     } else {
@@ -748,19 +761,6 @@ private fun SchedulerGrid(
                                                 }
                                             }
                                         }
-                                    }
-                                    // Ponto de disponibilidade no canto superior direito
-                                    if (dayAvail != null) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(6.dp)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    if (dayAvail.type == "UNAVAILABLE") Color(0xFFE53935)
-                                                    else DkGreen
-                                                )
-                                                .align(Alignment.TopEnd)
-                                        )
                                     }
                                 }
                             }

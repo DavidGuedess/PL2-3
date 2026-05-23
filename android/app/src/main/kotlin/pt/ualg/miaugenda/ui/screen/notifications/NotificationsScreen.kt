@@ -259,7 +259,6 @@ fun NotificationsScreen(
             }
             AppBottomNav(
                 active               = NavTab.NOTIFICATIONS,
-                notificationCount    = pendingCount,
                 onHomeClick          = onNavigateToHome,
                 onSchedulerClick     = onNavigateToScheduler,
                 onInboxClick         = onNavigateToInbox,
