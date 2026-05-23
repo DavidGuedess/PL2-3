@@ -1,10 +1,12 @@
 package pt.ualg.miaugenda.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import pt.ualg.miaugenda.AppState
 import pt.ualg.miaugenda.MiauGendaApp
 import pt.ualg.miaugenda.ui.screen.dashboard.DashboardScreen
 import pt.ualg.miaugenda.ui.screen.login.LoginScreen
@@ -37,6 +39,14 @@ fun NavGraph(
     navController: NavHostController,
     startDestination: String
 ) {
+    LaunchedEffect(Unit) {
+        AppState.tokenExpired.collect {
+            navController.navigate(Screen.Login.route) {
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = startDestination
@@ -209,8 +219,26 @@ fun NavGraph(
 
         composable(Screen.Team.route) {
             TeamScreen(
-                onBack = {
-                    navController.popBackStack()
+                onBack = { navController.popBackStack() },
+                onNavigateToHome = {
+                    navController.navigate(Screen.Dashboard.route) {
+                        popUpTo(Screen.Dashboard.route) { inclusive = true }
+                    }
+                },
+                onNavigateToScheduler = {
+                    navController.navigate(Screen.Scheduler.route) {
+                        popUpTo(Screen.Scheduler.route) { inclusive = true }
+                    }
+                },
+                onNavigateToInbox = {
+                    navController.navigate(Screen.Inbox.route) {
+                        popUpTo(Screen.Inbox.route) { inclusive = true }
+                    }
+                },
+                onNavigateToNotifications = {
+                    navController.navigate(Screen.Notifications.route) {
+                        popUpTo(Screen.Notifications.route) { inclusive = true }
+                    }
                 }
             )
         }

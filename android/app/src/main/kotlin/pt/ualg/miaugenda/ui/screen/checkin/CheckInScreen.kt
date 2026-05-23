@@ -17,11 +17,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import pt.ualg.miaugenda.data.model.AttendanceRecord
+import pt.ualg.miaugenda.data.model.Shift
+import pt.ualg.miaugenda.data.model.resolvedEndTime
+import pt.ualg.miaugenda.data.model.resolvedStartTime
 import pt.ualg.miaugenda.data.remote.RetrofitClient
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import java.time.DayOfWeek
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
+import java.util.Locale
+
 private val PurpleMain = Color(0xFF6F4BB2)
 private val PurpleSoft = Color(0xFFF3ECFA)
 private val BlueSoft = Color(0xFFEAF6FF)
@@ -37,9 +44,25 @@ fun CheckInScreen(
     var isLoading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var records by remember { mutableStateOf<List<AttendanceRecord>>(emptyList()) }
+    var todayShift by remember { mutableStateOf<Shift?>(null) }
 
     val scope = rememberCoroutineScope()
     val attendanceApi = RetrofitClient.attendanceApi
+
+    fun loadTodayShift() {
+        scope.launch {
+            try {
+                val today = LocalDate.now()
+                val weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toString()
+                val response = RetrofitClient.shiftApi.getMyShifts(week = weekStart)
+                if (response.isSuccessful) {
+                    todayShift = response.body().orEmpty().firstOrNull { s ->
+                        s.date.substring(0, 10) == today.toString() && s.published
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
 
     fun loadMyAttendanceHistory() {
         scope.launch {
@@ -68,6 +91,7 @@ fun CheckInScreen(
 
     LaunchedEffect(Unit) {
         loadMyAttendanceHistory()
+        loadTodayShift()
     }
 
     Scaffold(
@@ -117,6 +141,7 @@ fun CheckInScreen(
             CurrentShiftCard(
                 isWorking = isWorking,
                 isLoading = isLoading,
+                todayShift = todayShift,
                 onRegisterIn = {
                     scope.launch {
                         isLoading = true
@@ -208,6 +233,7 @@ fun CheckInScreen(
 private fun CurrentShiftCard(
     isWorking: Boolean,
     isLoading: Boolean,
+    todayShift: Shift?,
     onRegisterIn: () -> Unit,
     onRegisterOut: () -> Unit
 ) {
@@ -240,10 +266,18 @@ private fun CurrentShiftCard(
                         .fillMaxWidth()
                         .padding(12.dp)
                 ) {
-                    InfoText("Data", "Quinta-feira, 20 Novembro 2025")
-                    InfoText("Horário", "14:00 - 18:00")
-                    InfoText("Local", "Receção")
-                    InfoText("Função", "Atendimento ao cliente")
+                    if (todayShift != null) {
+                        val dateFormatted = runCatching {
+                            val d = LocalDate.parse(todayShift.date.substring(0, 10))
+                            d.format(DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM yyyy", Locale("pt", "PT")))
+                                .replaceFirstChar { it.uppercase() }
+                        }.getOrDefault(todayShift.date.substring(0, 10))
+                        InfoText("Data", dateFormatted)
+                        InfoText("Horário", "${todayShift.resolvedStartTime()} - ${todayShift.resolvedEndTime()}")
+                        todayShift.shiftType?.name?.let { InfoText("Posição", it) }
+                    } else {
+                        InfoText("Estado", "Sem turno agendado para hoje")
+                    }
                 }
             }
 

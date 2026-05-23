@@ -102,6 +102,13 @@ class TokenManager(context: Context) {
         sharedPreferences.edit().putString(KEY_ACCESS_TOKEN, accessToken).apply()
     }
 
+    fun updateTokens(accessToken: String, refreshToken: String) {
+        sharedPreferences.edit()
+            .putString(KEY_ACCESS_TOKEN, accessToken)
+            .putString(KEY_REFRESH_TOKEN, refreshToken)
+            .apply()
+    }
+
     fun updateUserData(
         name: String,
         contact: String?,

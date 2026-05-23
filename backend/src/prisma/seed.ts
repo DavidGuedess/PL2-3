@@ -135,16 +135,30 @@ async function main() {
     { userId: f2.id, shiftTypeId: integral.id, date: sex, published: false },
   ]
 
-  for (const s of shiftsToCreate) {
-    await prisma.shift.upsert({
-      where: { userId_date: { userId: s.userId, date: new Date(s.date) } },
-      update: { shiftTypeId: s.shiftTypeId, published: s.published },
-      create: {
-        userId: s.userId, shiftTypeId: s.shiftTypeId,
-        date: new Date(s.date), published: s.published
-      }
+  const existingShifts = await prisma.shift.count()
+  if (existingShifts === 0) {
+    await prisma.shift.createMany({
+      data: shiftsToCreate.map(s => ({
+        userId: s.userId,
+        shiftTypeId: s.shiftTypeId,
+        date: new Date(s.date),
+        published: s.published
+      }))
     })
   }
+
+  // ── Canais padrão ───────────────────────────────────────────────────────────
+  await prisma.channel.upsert({
+    where: { name: 'Todos' },
+    update: {},
+    create: { name: 'Todos', description: 'Canal público para todos os funcionários', isPublic: true, createdById: a1.id }
+  })
+
+  await prisma.channel.upsert({
+    where: { name: 'Anúncios' },
+    update: {},
+    create: { name: 'Anúncios', description: 'Para anúncios da gestão', isPublic: true, createdById: a1.id }
+  })
 
   console.log('Seed concluido:')
   console.log('  6 utilizadores | 4 tipos de turno | 17 turnos (18-24 Mai 2026)')

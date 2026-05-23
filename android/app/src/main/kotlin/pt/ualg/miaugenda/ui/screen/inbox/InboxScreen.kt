@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -22,56 +23,52 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import pt.ualg.miaugenda.MiauGendaApp
+import pt.ualg.miaugenda.data.model.Channel
+import pt.ualg.miaugenda.data.model.ChannelMessage
+import pt.ualg.miaugenda.data.model.CreateChannelRequest
+import pt.ualg.miaugenda.data.model.SendMessageRequest
+import pt.ualg.miaugenda.data.remote.RetrofitClient
 import pt.ualg.miaugenda.ui.components.AppBottomNav
 import pt.ualg.miaugenda.ui.components.NavTab
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
-// ── Cores ─────────────────────────────────────────────────────────────────────
 private val DkBg       = Color(0xFF000000)
 private val DkSurface  = Color(0xFF1C1C1E)
 private val DkSurface2 = Color(0xFF2C2C2E)
 private val Blue       = Color(0xFF2979FF)
 private val TxtGray    = Color(0xFF8E8E93)
-private val AvatarGrad = Brush.linearGradient(listOf(Color(0xFF5B5FEF), Color(0xFFC850C0), Color(0xFFF0696B)))
 
-// ── Navegação interna ─────────────────────────────────────────────────────────
+private val channelColors = listOf(
+    Color(0xFF5B5FEF), Color(0xFFE53935), Color(0xFF1A237E),
+    Color(0xFF00838F), Color(0xFF2E7D32), Color(0xFF6A1B9A),
+    Color(0xFFBF360C), Color(0xFF4527A0)
+)
+
+private val avatarColors = listOf(
+    Color(0xFF1565C0), Color(0xFF2E7D32), Color(0xFF6A1B9A),
+    Color(0xFF00838F), Color(0xFFBF360C), Color(0xFF4E342E),
+    Color(0xFF4527A0), Color(0xFF00695C)
+)
+
 private sealed class InboxSubScreen {
     object Main : InboxSubScreen()
     object NewChat : InboxSubScreen()
-    data class ChatRoom(val name: String, val subtitle: String) : InboxSubScreen()
+    data class ChatRoom(val channelId: Int, val channelName: String) : InboxSubScreen()
 }
 
-// ── Dados mock ────────────────────────────────────────────────────────────────
-private data class Channel(
-    val name: String,
-    val subtitle: String,
-    val iconBg: Color,
-    val icon: ImageVector
-)
-
-private val channels = listOf(
-    Channel("Todos",     "Canal público para todos os funcionários", Color(0xFF5B5FEF), Icons.Outlined.Group),
-    Channel("Anúncios",  "Para anúncios da gestão",                  Color(0xFFE53935), Icons.Outlined.Campaign),
-    Channel("Outros",    "Ver canais ou criar um novo",               Color(0xFF1A237E), Icons.Outlined.Search),
-)
-
-private data class Member(val name: String, val initials: String, val color: Color)
-
-private val members = listOf(
-    Member("Administrador 1", "A1", Color(0xFF1565C0)),
-    Member("Administrador 2", "A2", Color(0xFF2E7D32)),
-    Member("Gerente 1",       "G1", Color(0xFF6A1B9A)),
-    Member("Gerente 2",       "G2", Color(0xFF00838F)),
-    Member("Funcionario 1",   "F1", Color(0xFFBF360C)),
-    Member("Funcionario 2",   "F2", Color(0xFF4E342E)),
-)
-
-// ── Root ──────────────────────────────────────────────────────────────────────
 @Composable
 fun InboxScreen(
     onSchedulerClick: () -> Unit = {},
@@ -79,450 +76,564 @@ fun InboxScreen(
     onHomeClick: () -> Unit = {},
     onEquipaClick: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val tokenManager = MiauGendaApp.getTokenManager(context)
+    val currentUserId = tokenManager.getUserId()
+    val currentUserRole = tokenManager.getUserRole() ?: "EMPLOYEE"
+
     var screen by remember { mutableStateOf<InboxSubScreen>(InboxSubScreen.Main) }
 
     BackHandler(enabled = screen !is InboxSubScreen.Main) {
         screen = InboxSubScreen.Main
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DkBg)
-            .systemBarsPadding()
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(DkBg).systemBarsPadding()) {
         when (val s = screen) {
             is InboxSubScreen.Main -> InboxMain(
-                onNewChat       = { screen = InboxSubScreen.NewChat },
-                onChannelClick  = { ch ->
-                    if (ch.name == "Outros") screen = InboxSubScreen.NewChat
-                    else screen = InboxSubScreen.ChatRoom(ch.name, ch.subtitle)
-                },
-                onSchedulerClick      = onSchedulerClick,
-                onNotificationsClick  = onNotificationsClick,
-                onHomeClick           = onHomeClick,
-                onEquipaClick         = onEquipaClick
+                currentUserId        = currentUserId,
+                onNewChat            = { screen = InboxSubScreen.NewChat },
+                onChannelClick       = { channel -> screen = InboxSubScreen.ChatRoom(channel.id, channel.name) },
+                onSchedulerClick     = onSchedulerClick,
+                onNotificationsClick = onNotificationsClick,
+                onHomeClick          = onHomeClick,
+                onEquipaClick        = onEquipaClick
             )
             is InboxSubScreen.NewChat -> NewChatScreen(
-                onBack        = { screen = InboxSubScreen.Main },
-                onSelectChat  = { name, sub -> screen = InboxSubScreen.ChatRoom(name, sub) }
+                currentUserId    = currentUserId,
+                currentUserRole  = currentUserRole,
+                onBack           = { screen = InboxSubScreen.Main },
+                onSelectChannel  = { channel -> screen = InboxSubScreen.ChatRoom(channel.id, channel.name) }
             )
             is InboxSubScreen.ChatRoom -> ChatRoomScreen(
-                name     = s.name,
-                subtitle = s.subtitle,
-                onBack   = { screen = InboxSubScreen.Main }
+                channelId     = s.channelId,
+                channelName   = s.channelName,
+                currentUserId = currentUserId,
+                onBack        = { screen = InboxSubScreen.Main }
             )
         }
     }
 }
 
-// ── Ecrã principal da Caixa ───────────────────────────────────────────────────
+// ── Ecrã principal ────────────────────────────────────────────────────────────
+
 @Composable
 private fun InboxMain(
+    currentUserId: Int,
     onNewChat: () -> Unit,
     onChannelClick: (Channel) -> Unit,
     onSchedulerClick: () -> Unit,
     onNotificationsClick: () -> Unit,
     onHomeClick: () -> Unit,
-    onEquipaClick: () -> Unit = {}
+    onEquipaClick: () -> Unit
 ) {
+    var channels by remember { mutableStateOf<List<Channel>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun reload() {
+        scope.launch {
+            isLoading = true
+            errorMsg = null
+            try {
+                val resp = RetrofitClient.messagingApi.getChannels()
+                when {
+                    resp.isSuccessful -> channels = resp.body().orEmpty()
+                    resp.code() == 401 -> errorMsg = "Sessão expirada. Faz login novamente."
+                    else -> errorMsg = "Erro do servidor (${resp.code()})"
+                }
+            } catch (e: Exception) {
+                errorMsg = "Sem ligação ao servidor"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { reload() }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        // Header
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                "Caixa",
-                color = Color.White,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
+            Text("Caixa", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
             Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(Blue)
-                    .clickable { onNewChat() },
+                modifier = Modifier.size(36.dp).clip(CircleShape).background(Blue).clickable { onNewChat() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Outlined.Add, contentDescription = "Novo chat", tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(Icons.Outlined.Add, contentDescription = "Novo canal", tint = Color.White, modifier = Modifier.size(20.dp))
             }
         }
 
-        // Lista de canais
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp)
-        ) {
-            items(channels) { ch ->
-                ChannelRow(
-                    channel  = ch,
-                    onClick  = { onChannelClick(ch) }
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .padding(start = 80.dp)
-                        .background(Color.White.copy(alpha = 0.07f))
-                )
+        when {
+            isLoading -> Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Blue)
+            }
+            errorMsg != null -> Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                    Icon(Icons.Outlined.WifiOff, contentDescription = null, tint = TxtGray, modifier = Modifier.size(48.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(errorMsg!!, color = TxtGray, fontSize = 15.sp, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = { reload() }, colors = ButtonDefaults.buttonColors(containerColor = Blue)) {
+                        Text("Tentar novamente")
+                    }
+                }
+            }
+            channels.isEmpty() -> Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                    Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null, tint = TxtGray, modifier = Modifier.size(48.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Sem canais disponíveis", color = TxtGray, fontSize = 16.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Cria um canal para começar a comunicar", color = TxtGray, fontSize = 13.sp, textAlign = TextAlign.Center)
+                }
+            }
+            else -> LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(vertical = 4.dp)) {
+                items(channels, key = { it.id }) { ch ->
+                    ChannelRow(channel = ch, onClick = { onChannelClick(ch) })
+                    Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 80.dp).background(Color.White.copy(alpha = 0.07f)))
+                }
             }
         }
 
         AppBottomNav(
             active               = NavTab.INBOX,
+            onHomeClick          = onHomeClick,
             onSchedulerClick     = onSchedulerClick,
             onNotificationsClick = onNotificationsClick,
-            onHomeClick          = onHomeClick,
             onMenuClick          = onEquipaClick
         )
-
     }
 }
 
 @Composable
 private fun ChannelRow(channel: Channel, onClick: () -> Unit) {
+    val lastMsg = channel.messages.firstOrNull()
+    val bgColor = channelColors[channel.id % channelColors.size]
+
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Box(
-            modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(channel.iconBg),
+            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(bgColor),
             contentAlignment = Alignment.Center
         ) {
-            Icon(channel.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp))
+            Text(
+                channel.name.first().uppercaseChar().toString(),
+                color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold
+            )
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(channel.name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text(channel.subtitle, color = TxtGray, fontSize = 13.sp, maxLines = 1)
+            if (lastMsg != null) {
+                Text(
+                    "${lastMsg.user.name}: ${lastMsg.content}",
+                    color = TxtGray, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+            } else {
+                Text(channel.description ?: "Sem mensagens", color = TxtGray, fontSize = 13.sp, maxLines = 1)
+            }
         }
-        Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            if (lastMsg != null) {
+                Text(formatMessageTime(lastMsg.createdAt), color = TxtGray, fontSize = 11.sp)
+            }
+            Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
+        }
     }
 }
 
-// ── Novo Chat / Outros ────────────────────────────────────────────────────────
+// ── Novo Chat ─────────────────────────────────────────────────────────────────
+
 @Composable
 private fun NewChatScreen(
+    currentUserId: Int,
+    currentUserRole: String,
     onBack: () -> Unit,
-    onSelectChat: (String, String) -> Unit
+    onSelectChannel: (Channel) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
+    var channels by remember { mutableStateOf<List<Channel>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var newChannelName by remember { mutableStateOf("") }
+    var newChannelDesc by remember { mutableStateOf("") }
+    var isCreating by remember { mutableStateOf(false) }
+    var createError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val canCreate = currentUserRole == "ADMIN" || currentUserRole == "MANAGER"
 
-    val filteredChannels = remember(query) {
-        channels.filter { it.name != "Outros" && (query.isBlank() || it.name.contains(query, ignoreCase = true)) }
+    LaunchedEffect(Unit) {
+        try {
+            val resp = RetrofitClient.messagingApi.getChannels()
+            if (resp.isSuccessful) channels = resp.body().orEmpty()
+        } catch (_: Exception) {}
+        isLoading = false
     }
-    val filteredMembers = remember(query) {
-        members.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
+
+    val filteredChannels = remember(channels, query) {
+        if (query.isBlank()) channels
+        else channels.filter { it.name.contains(query, ignoreCase = true) }
+    }
+
+    if (showCreateDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateDialog = false; createError = null; newChannelName = ""; newChannelDesc = "" },
+            containerColor = DkSurface,
+            title = { Text("Novo Canal", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = newChannelName,
+                        onValueChange = { newChannelName = it },
+                        label = { Text("Nome do canal", color = TxtGray) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Blue, unfocusedBorderColor = DkSurface2,
+                            focusedTextColor = Color.White, unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = newChannelDesc,
+                        onValueChange = { newChannelDesc = it },
+                        label = { Text("Descrição (opcional)", color = TxtGray) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Blue, unfocusedBorderColor = DkSurface2,
+                            focusedTextColor = Color.White, unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    createError?.let { Text(it, color = Color(0xFFFF453A), fontSize = 13.sp) }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newChannelName.isBlank()) return@TextButton
+                        isCreating = true
+                        createError = null
+                        scope.launch {
+                            try {
+                                val resp = RetrofitClient.messagingApi.createChannel(
+                                    CreateChannelRequest(
+                                        name = newChannelName.trim(),
+                                        description = newChannelDesc.trim().ifBlank { null }
+                                    )
+                                )
+                                if (resp.isSuccessful) {
+                                    resp.body()?.let { onSelectChannel(it) }
+                                    showCreateDialog = false
+                                    newChannelName = ""
+                                    newChannelDesc = ""
+                                } else if (resp.code() == 409) {
+                                    createError = "Já existe um canal com esse nome"
+                                } else {
+                                    createError = "Erro ao criar canal (${resp.code()})"
+                                }
+                            } catch (_: Exception) {
+                                createError = "Sem ligação ao servidor"
+                            }
+                            isCreating = false
+                        }
+                    },
+                    enabled = newChannelName.isNotBlank() && !isCreating
+                ) {
+                    Text(if (isCreating) "A criar..." else "Criar", color = Blue)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateDialog = false; createError = null; newChannelName = ""; newChannelDesc = "" }) {
+                    Text("Cancelar", color = TxtGray)
+                }
+            }
+        )
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Header
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = onBack) {
-                Text("Cancelar", color = Blue, fontSize = 16.sp)
-            }
-            Text(
-                "Novo Chat",
-                color = Color.White,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f)
-            )
+            TextButton(onClick = onBack) { Text("Cancelar", color = Blue, fontSize = 16.sp) }
+            Text("Novo Chat", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
             Spacer(Modifier.width(80.dp))
         }
 
-        // Barra de pesquisa
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(DkSurface)
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(12.dp)).background(DkSurface)
                 .padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Outlined.Search, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
-                if (query.isEmpty()) {
-                    Text("Pesquisar funcionários...", color = TxtGray, fontSize = 15.sp)
+                Box {
+                    if (query.isEmpty()) Text("Pesquisar canais...", color = TxtGray, fontSize = 15.sp)
+                    BasicTextField(
+                        value = query, onValueChange = { query = it }, singleLine = true,
+                        textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                        cursorBrush = SolidColor(Blue), modifier = Modifier.fillMaxWidth()
+                    )
                 }
-                BasicTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    singleLine = true,
-                    textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
-                    cursorBrush = SolidColor(Blue),
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
         }
 
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(vertical = 8.dp)
-        ) {
-            // Criar novo canal
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {}
-                        .padding(horizontal = 20.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(Blue),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Outlined.Group, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
-                    }
-                    Text("Criar novo canal de chat", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                    Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
-                }
-                Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 80.dp).background(Color.White.copy(alpha = 0.07f)))
+        if (isLoading) {
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Blue)
             }
-
-            // Secção sugeridos
-            item {
-                Text(
-                    "Sugeridos",
-                    color = TxtGray,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(DkSurface2)
-                        .padding(horizontal = 20.dp, vertical = 8.dp)
-                )
-            }
-
-            // Canais sugeridos
-            items(filteredChannels) { ch ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelectChat(ch.name, ch.subtitle) }
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(ch.iconBg),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(ch.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+        } else {
+            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(vertical = 8.dp)) {
+                if (canCreate) {
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { showCreateDialog = true }
+                                .padding(horizontal = 20.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(Blue), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Outlined.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+                            }
+                            Text("Criar novo canal", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
+                        }
+                        Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 80.dp).background(Color.White.copy(alpha = 0.07f)))
                     }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(ch.name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text(ch.subtitle, color = TxtGray, fontSize = 13.sp, maxLines = 1)
-                    }
-                    Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
                 }
-                Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 80.dp).background(Color.White.copy(alpha = 0.07f)))
-            }
 
-            // Membros
-            items(filteredMembers) { m ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelectChat(m.name, "") }
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(m.color),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(m.initials, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                if (filteredChannels.isNotEmpty()) {
+                    item {
+                        Text("Canais", color = TxtGray, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.fillMaxWidth().background(DkSurface2).padding(horizontal = 20.dp, vertical = 8.dp))
                     }
-                    Text(m.name, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                    Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
+                    items(filteredChannels, key = { it.id }) { ch ->
+                        val bgColor = channelColors[ch.id % channelColors.size]
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onSelectChannel(ch) }
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Box(modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(bgColor), contentAlignment = Alignment.Center) {
+                                Text(ch.name.first().uppercaseChar().toString(), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(ch.name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                ch.description?.let { Text(it, color = TxtGray, fontSize = 13.sp, maxLines = 1) }
+                            }
+                            Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(18.dp))
+                        }
+                        Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 80.dp).background(Color.White.copy(alpha = 0.07f)))
+                    }
+                } else if (!canCreate) {
+                    item {
+                        Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            Text("Sem canais encontrados", color = TxtGray, fontSize = 15.sp, textAlign = TextAlign.Center)
+                        }
+                    }
                 }
-                Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 80.dp).background(Color.White.copy(alpha = 0.07f)))
             }
         }
     }
 }
 
 // ── Ecrã de Chat ──────────────────────────────────────────────────────────────
+
 @Composable
 private fun ChatRoomScreen(
-    name: String,
-    subtitle: String,
+    channelId: Int,
+    channelName: String,
+    currentUserId: Int,
     onBack: () -> Unit
 ) {
-    var message by remember { mutableStateOf("") }
+    var messages by remember { mutableStateOf<List<ChannelMessage>>(emptyList()) }
+    var messageText by remember { mutableStateOf("") }
+    var isSending by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+
+    suspend fun loadMessages() {
+        try {
+            val resp = RetrofitClient.messagingApi.getMessages(channelId)
+            if (resp.isSuccessful) messages = resp.body().orEmpty()
+        } catch (_: Exception) {}
+    }
+
+    LaunchedEffect(channelId) {
+        loadMessages()
+        while (true) {
+            delay(5000)
+            loadMessages()
+        }
+    }
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Header
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable { onBack() }
-                    .padding(4.dp)
-            ) {
+            Box(modifier = Modifier.clip(CircleShape).clickable { onBack() }.padding(4.dp)) {
                 Icon(Icons.Filled.ArrowBack, contentDescription = "Voltar", tint = Color.White, modifier = Modifier.size(22.dp))
             }
             Text(
-                name,
-                color = Color.White,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f)
+                channelName, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center, modifier = Modifier.weight(1f)
             )
             Box {
                 Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(DkSurface2)
-                        .clickable { showMenu = true },
+                    modifier = Modifier.size(36.dp).clip(CircleShape).background(DkSurface2).clickable { showMenu = true },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Outlined.MoreHoriz, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                 }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                    modifier = Modifier.background(DkSurface)
-                ) {
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }, modifier = Modifier.background(DkSurface)) {
                     DropdownMenuItem(
                         text = { Text("Detalhes do canal", color = Color.White, fontSize = 15.sp) },
                         onClick = { showMenu = false }
                     )
-                    DropdownMenuItem(
-                        text = { Text("Silenciar notificações", color = Color.White, fontSize = 15.sp) },
-                        onClick = { showMenu = false }
-                    )
                 }
             }
         }
 
-        // Empty state
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(horizontal = 32.dp)
+        HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+
+        if (messages.isEmpty()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                    Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null, tint = TxtGray, modifier = Modifier.size(48.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Sem mensagens ainda", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Envia a primeira mensagem para o canal!", color = TxtGray, fontSize = 14.sp, textAlign = TextAlign.Center)
+                }
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(100.dp)
-                        .clip(CircleShape)
-                        .background(DkSurface),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        if (name == "Todos" || name == "Anúncios") Icons.Outlined.Campaign else Icons.Outlined.ChatBubbleOutline,
-                        contentDescription = null,
-                        tint = TxtGray,
-                        modifier = Modifier.size(44.dp)
-                    )
+                items(messages, key = { it.id }) { msg ->
+                    MessageBubble(message = msg, isOwn = msg.userId == currentUserId)
                 }
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    subtitle.ifBlank { "Chat com $name" },
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "Todos os membros da equipa recebem notificações das últimas mensagens.",
-                    color = TxtGray,
-                    fontSize = 14.sp,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 20.sp
-                )
             }
         }
 
-        // Input de mensagem
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(DkSurface)
+            modifier = Modifier.fillMaxWidth().background(DkSurface)
                 .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(0.dp))
                 .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(DkSurface2)
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(20.dp)).background(DkSurface2)
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
-                    if (message.isEmpty()) {
-                        Text("Enviar uma mensagem...", color = TxtGray, fontSize = 15.sp)
-                    }
+                    if (messageText.isEmpty()) Text("Enviar uma mensagem...", color = TxtGray, fontSize = 15.sp)
                     BasicTextField(
-                        value = message,
-                        onValueChange = { message = it },
-                        singleLine = false,
-                        maxLines = 4,
+                        value = messageText, onValueChange = { messageText = it },
+                        singleLine = false, maxLines = 4,
                         textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
-                        cursorBrush = SolidColor(Blue),
-                        modifier = Modifier.fillMaxWidth()
+                        cursorBrush = SolidColor(Blue), modifier = Modifier.fillMaxWidth()
                     )
                 }
+                val canSend = messageText.isNotBlank() && !isSending
                 Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(if (message.isNotBlank()) Blue else DkSurface2)
-                        .clickable(enabled = message.isNotBlank()) { message = "" },
+                    modifier = Modifier.size(40.dp).clip(CircleShape)
+                        .background(if (canSend) Blue else DkSurface2)
+                        .clickable(enabled = canSend) {
+                            val content = messageText.trim()
+                            messageText = ""
+                            isSending = true
+                            scope.launch {
+                                try {
+                                    val resp = RetrofitClient.messagingApi.sendMessage(channelId, SendMessageRequest(content))
+                                    if (resp.isSuccessful) resp.body()?.let { messages = messages + it }
+                                } catch (_: Exception) {}
+                                isSending = false
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Filled.Send,
-                        contentDescription = "Enviar",
-                        tint = if (message.isNotBlank()) Color.White else TxtGray,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Icon(Icons.Filled.Send, contentDescription = "Enviar",
+                        tint = if (canSend) Color.White else TxtGray, modifier = Modifier.size(18.dp))
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MessageBubble(message: ChannelMessage, isOwn: Boolean) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = if (isOwn) Alignment.End else Alignment.Start
+    ) {
+        if (!isOwn) {
+            val initial = message.user.name.first().uppercaseChar()
+            val color = avatarColors[message.userId % avatarColors.size]
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier.size(28.dp).clip(CircleShape).background(color),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(initial.toString(), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Column {
+                    Text(message.user.name, color = Blue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 2.dp, bottom = 2.dp))
+                    Box(
+                        modifier = Modifier.widthIn(max = 280.dp)
+                            .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp))
+                            .background(DkSurface).padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(message.content, color = Color.White, fontSize = 15.sp, lineHeight = 20.sp)
+                    }
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier.widthIn(max = 280.dp)
+                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp))
+                    .background(Blue).padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Text(message.content, color = Color.White, fontSize = 15.sp, lineHeight = 20.sp)
+            }
+        }
+        Text(
+            formatMessageTime(message.createdAt),
+            color = TxtGray, fontSize = 11.sp,
+            modifier = Modifier.padding(top = 2.dp, start = if (isOwn) 0.dp else 36.dp, end = 4.dp)
+        )
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+private fun formatMessageTime(timestamp: String): String {
+    return try {
+        val instant = Instant.parse(timestamp)
+        val now = Instant.now()
+        val zoned = instant.atZone(ZoneId.systemDefault())
+        when {
+            ChronoUnit.MINUTES.between(instant, now) < 1 -> "agora"
+            ChronoUnit.HOURS.between(instant, now) < 24 -> zoned.format(DateTimeFormatter.ofPattern("HH:mm"))
+            ChronoUnit.DAYS.between(instant, now) < 7 -> zoned.format(DateTimeFormatter.ofPattern("EEE HH:mm"))
+            else -> zoned.format(DateTimeFormatter.ofPattern("dd/MM HH:mm"))
+        }
+    } catch (_: Exception) {
+        ""
     }
 }

@@ -5,6 +5,7 @@ import shiftTypesRoutes from './routes/shiftTypes'
 import shiftsRoutes from './routes/shifts'
 import attendanceRoutes from './routes/attendance'
 import weekAssignmentsRoutes from './routes/weekAssignments'
+import channelsRoutes from './routes/channels'
 import { errorHandler } from './middleware/errorHandler'
 
 const app = express()
@@ -21,6 +22,7 @@ app.use('/shift-types', shiftTypesRoutes)
 app.use('/shifts', shiftsRoutes)
 app.use('/attendance', attendanceRoutes)
 app.use('/week-assignments', weekAssignmentsRoutes)
+app.use('/channels', channelsRoutes)
 
 app.use(errorHandler)
 

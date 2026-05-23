@@ -8,6 +8,7 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.Path
 
 interface UserApi {
 
@@ -25,5 +26,15 @@ interface UserApi {
     @POST("users")
     suspend fun createUser(
         @Body request: CreateUserRequest
+    ): Response<User>
+
+    @PATCH("users/{id}/deactivate")
+    suspend fun deactivateUser(
+        @Path("id") id: Int
+    ): Response<User>
+
+    @PATCH("users/{id}/activate")
+    suspend fun activateUser(
+        @Path("id") id: Int
     ): Response<User>
 }
