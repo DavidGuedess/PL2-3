@@ -5,12 +5,19 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import pt.ualg.miaugenda.data.model.AttendanceRecord
+import pt.ualg.miaugenda.data.model.CreateAttendanceBody
 import pt.ualg.miaugenda.data.model.Shift
+import pt.ualg.miaugenda.data.model.TimeOffRequest
+import pt.ualg.miaugenda.data.model.ShiftSwapRequest
 import pt.ualg.miaugenda.data.remote.RetrofitClient
 import java.time.LocalDate
 
 data class DashboardUiState(
     val shifts: List<Shift> = emptyList(),
+    val attendanceRecords: List<AttendanceRecord> = emptyList(),
+    val timeOffRequests: List<TimeOffRequest> = emptyList(),
+    val shiftSwapRequests: List<ShiftSwapRequest> = emptyList(),
     val isLoading: Boolean = true,
     val error: Boolean = false,
     // Estado de assiduidade
@@ -31,11 +38,16 @@ class DashboardViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = false)
             try {
-                val response = RetrofitClient.shiftApi.getMyShifts(week = weekStart.toString())
-                if (response.isSuccessful) {
+                val weekEnd = weekStart.plusDays(6)
+                val shiftsResp = RetrofitClient.shiftApi.getMyShifts(week = weekStart.toString())
+                val attendResp = RetrofitClient.attendanceApi.getMyHistory(
+                    from = weekStart.toString(), to = weekEnd.toString()
+                )
+                if (shiftsResp.isSuccessful) {
                     _uiState.value = _uiState.value.copy(
-                        shifts    = response.body().orEmpty(),
-                        isLoading = false
+                        shifts            = shiftsResp.body().orEmpty(),
+                        attendanceRecords = if (attendResp.isSuccessful) attendResp.body().orEmpty() else emptyList(),
+                        isLoading         = false
                     )
                 } else {
                     _uiState.value = _uiState.value.copy(isLoading = false, error = true)
@@ -68,7 +80,7 @@ class DashboardViewModel : ViewModel() {
     fun clockIn(onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
             try {
-                val r = RetrofitClient.attendanceApi.register(mapOf("type" to "IN"))
+                val r = RetrofitClient.attendanceApi.register(CreateAttendanceBody(type = "IN"))
                 if (r.isSuccessful) {
                     val record = r.body()
                     _uiState.value = _uiState.value.copy(
@@ -85,10 +97,12 @@ class DashboardViewModel : ViewModel() {
         }
     }
 
-    fun clockOut(onResult: (Boolean) -> Unit) {
+    fun clockOut(note: String = "", onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
             try {
-                val r = RetrofitClient.attendanceApi.register(mapOf("type" to "OUT"))
+                val r = RetrofitClient.attendanceApi.register(
+                    CreateAttendanceBody(type = "OUT", note = note.ifBlank { null })
+                )
                 if (r.isSuccessful) {
                     _uiState.value = _uiState.value.copy(
                         isClocked      = false,
@@ -101,6 +115,19 @@ class DashboardViewModel : ViewModel() {
             } catch (e: Exception) {
                 onResult(false)
             }
+        }
+    }
+
+    fun loadMyRequests() {
+        viewModelScope.launch {
+            try {
+                val torResponse = RetrofitClient.requestApi.getTimeOffRequests()
+                val ssrResponse = RetrofitClient.requestApi.getShiftSwapRequests()
+                _uiState.value = _uiState.value.copy(
+                    timeOffRequests   = if (torResponse.isSuccessful) torResponse.body().orEmpty() else _uiState.value.timeOffRequests,
+                    shiftSwapRequests = if (ssrResponse.isSuccessful) ssrResponse.body().orEmpty() else _uiState.value.shiftSwapRequests
+                )
+            } catch (_: Exception) { }
         }
     }
 }

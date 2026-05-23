@@ -40,13 +40,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
+import pt.ualg.miaugenda.data.model.AttendanceRecord
 import pt.ualg.miaugenda.data.model.CreateUserRequest
 import pt.ualg.miaugenda.ui.components.AppBottomNav
 import pt.ualg.miaugenda.ui.components.NavTab
+import pt.ualg.miaugenda.data.model.Availability
 import pt.ualg.miaugenda.data.model.Shift
 import pt.ualg.miaugenda.data.model.ShiftType
 import pt.ualg.miaugenda.data.model.User
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -93,13 +97,20 @@ private fun userGradient(userId: Int): Brush? {
     return if (userId % 4 == 0) AvatarGrad else null
 }
 
-private fun shiftCellColor(startTime: String, published: Boolean): Color {
+private val userCellColors = listOf(
+    Color(0xFF5B7FA6), // azul acinzentado
+    Color(0xFFA0574F), // terracota suave
+    Color(0xFF5A8A6A), // verde seco
+    Color(0xFF4A8A8A), // teal apagado
+    Color(0xFF7A5C8A), // malva
+    Color(0xFF8A7040), // ocre
+    Color(0xFF5A6A8A), // azul ardósia
+    Color(0xFF8A5070), // velho-rosa
+)
+
+private fun shiftCellColor(published: Boolean, userId: Int): Color {
     if (!published) return Color(0xFF2A2A2A)
-    return when {
-        startTime >= "20:00" || startTime < "06:00" -> CellPurple
-        startTime >= "13:00" -> CellRed
-        else -> CellBlue
-    }
+    return userCellColors[userId % userCellColors.size]
 }
 
 private fun categoryLabel(category: String): String = when (category) {
@@ -254,17 +265,45 @@ private fun calcDuration(start: String, end: String, breakMin: Int = 0): String 
     return if (m == 0) "${h}h 0m" else "${h}h ${m}m"
 }
 
+// ── Estado de presença do turno ───────────────────────────────────────────────
+private enum class ShiftStatus { DRAFT, PUBLISHED, ON_SHIFT, LATE, FINISHED, ABSENT }
+
+private fun computeShiftStatus(
+    shift: Shift,
+    attendanceRecords: List<AttendanceRecord>,
+    now: LocalDateTime = LocalDateTime.now()
+): ShiftStatus {
+    if (!shift.published) return ShiftStatus.DRAFT
+    return try {
+        val dateStr = shift.date.substring(0, 10)
+        val clockIn  = attendanceRecords.find { it.userId == shift.userId && it.type == "IN"  && it.timestamp.startsWith(dateStr) }
+        val clockOut = attendanceRecords.find { it.userId == shift.userId && it.type == "OUT" && it.timestamp.startsWith(dateStr) }
+        val shiftStartDt = LocalDateTime.of(LocalDate.parse(dateStr), LocalTime.parse(shift.resolvedStartTime()))
+        val lateCutoff = shiftStartDt.plusMinutes(15)
+        val zoneId = java.time.ZoneId.systemDefault()
+        fun parseTs(ts: String): LocalDateTime = runCatching {
+            java.time.Instant.parse(ts).atZone(zoneId).toLocalDateTime()
+        }.getOrElse { LocalDateTime.parse(ts.substring(0, 19)) }
+        when {
+            clockIn != null -> {
+                val isLate = parseTs(clockIn.timestamp).isAfter(lateCutoff)
+                if (clockOut != null) if (isLate) ShiftStatus.LATE else ShiftStatus.FINISHED
+                else if (isLate) ShiftStatus.LATE else ShiftStatus.ON_SHIFT
+            }
+            now.isAfter(lateCutoff) -> ShiftStatus.ABSENT
+            else -> ShiftStatus.PUBLISHED
+        }
+    } catch (_: Exception) { ShiftStatus.PUBLISHED }
+}
+
 private val STATUS_FILTERS = listOf(
-    Triple("Abertura",          Icons.Outlined.RadioButtonUnchecked, Color(0xFF888888)),
-    Triple("A aguardar",        Icons.Outlined.AccessTime,           Orange),
-    Triple("Rejeitado",         Icons.Outlined.Cancel,               RedBadge),
-    Triple("Confirmado",        Icons.Outlined.CheckCircle,          DkGreen),
-    Triple("Em Turno",          Icons.Outlined.PlayArrow,            Blue),
-    Triple("Em Pausa",          Icons.Outlined.Pause,                Orange),
-    Triple("Atrasado",          Icons.Outlined.Schedule,             RedBadge),
-    Triple("Nao preenchido",    Icons.Outlined.RemoveCircle,         TxtGray),
-    Triple("Ausente",           Icons.Outlined.Person,               RedBadge),
-    Triple("Concluido",         Icons.Outlined.CheckCircleOutline,   TxtGray),
+    Triple("Todos",      Icons.Outlined.List,                Color.White),
+    Triple("Publicado",  Icons.Outlined.CheckCircle,         Blue),
+    Triple("Rascunho",   Icons.Outlined.Lock,                TxtGray),
+    Triple("Concluido",  Icons.Outlined.CheckCircleOutline,  TxtGray),
+    Triple("Ausente",    Icons.Outlined.Block,               RedBadge),
+    Triple("Atrasado",   Icons.Outlined.Schedule,            Orange),
+    Triple("Em Turno",   Icons.Outlined.PlayArrow,           DkGreen),
 )
 
 // ── Root ──────────────────────────────────────────────────────────────────────
@@ -278,7 +317,8 @@ fun SchedulerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var screen by remember { mutableStateOf<SchedScreen>(SchedScreen.Grid) }
-    var bannerMsg by remember { mutableStateOf<Pair<String, Boolean>?>(null) } // message, isError
+    var bannerMsg  by remember { mutableStateOf<Pair<String, Boolean>?>(null) } // message, isError
+    var bannerMsg2 by remember { mutableStateOf<Pair<String, Boolean>?>(null) } // second banner (for mixed publish results)
     val userRole = viewModel.userRole
 
     LaunchedEffect(Unit) { viewModel.loadWeek() }
@@ -286,6 +326,7 @@ fun SchedulerScreen(
     BackHandler(enabled = screen !is SchedScreen.Grid) { screen = SchedScreen.Grid }
 
     fun showBanner(msg: String, isError: Boolean = false) { bannerMsg = Pair(msg, isError) }
+    fun showBanner2(msg: String, isError: Boolean = false) { bannerMsg2 = Pair(msg, isError) }
 
     // Objeto User mínimo para vista pessoal do EMPLOYEE
     val meUser = User(
@@ -389,19 +430,38 @@ fun SchedulerScreen(
                         PublicarHorarioScreen(
                             uiState  = uiState,
                             onBack   = { screen = SchedScreen.Grid },
-                            onSuccess = { msg -> showBanner(msg); screen = SchedScreen.Grid },
+                            onPublishDone = { ok, fail ->
+                                if (ok > 0) showBanner("$ok turnos publicados com sucesso")
+                                if (fail > 0) showBanner2("$fail turnos com erro", isError = true)
+                                screen = SchedScreen.Grid
+                            },
                             onPublishMultiple = { ids, cb -> viewModel.publishMultipleShifts(ids, cb) }
                         )
                     is SchedScreen.FiltrarHorario ->
                         FilterScreen(
+                            currentStatus   = uiState.statusFilter,
+                            currentCategory = uiState.categoryFilter,
+                            uiState         = uiState,
                             onBack          = { screen = SchedScreen.Grid },
-                            onPositionClick = { screen = SchedScreen.FiltrarPosicao },
-                            onSuccess       = { showBanner("Filtros aplicados"); screen = SchedScreen.Grid }
+                            onPositionClick = { statusToSave ->
+                                viewModel.setFilters(statusToSave, uiState.categoryFilter)
+                                screen = SchedScreen.FiltrarPosicao
+                            },
+                            onApply         = { status, category ->
+                                viewModel.setFilters(status, category)
+                                showBanner(if (status != null || category != null) "Filtros aplicados" else "Filtros limpos")
+                                screen = SchedScreen.Grid
+                            }
                         )
                     is SchedScreen.FiltrarPosicao ->
                         PositionFilterScreen(
-                            uiState = uiState,
-                            onBack  = { screen = SchedScreen.FiltrarHorario }
+                            uiState         = uiState,
+                            currentCategory = uiState.categoryFilter,
+                            onApply         = { category ->
+                                viewModel.setFilters(uiState.statusFilter, category)
+                                screen = SchedScreen.FiltrarHorario
+                            },
+                            onBack          = { screen = SchedScreen.FiltrarHorario }
                         )
                     is SchedScreen.CriarFuncionario ->
                         CriarFuncionarioScreen(
@@ -424,31 +484,45 @@ fun SchedulerScreen(
             }
         }
 
-        // Banner de feedback (verde = sucesso, vermelho = erro; swipe para cima para fechar)
-        bannerMsg?.let { (msg, isError) ->
-            LaunchedEffect(msg) { delay(3500); bannerMsg = null }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.TopCenter)
-                    .padding(top = 8.dp, start = 16.dp, end = 16.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (isError) RedBadge else DkGreen)
-                    .pointerInput(msg) {
-                        detectVerticalDragGestures { _, dragAmount ->
-                            if (dragAmount < -20f) bannerMsg = null
-                        }
-                    }
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        if (isError) Icons.Filled.Error else Icons.Filled.CheckCircle,
-                        null, tint = Color.White, modifier = Modifier.size(20.dp)
-                    )
-                    Text(msg, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        // Banners de feedback (verde = sucesso, vermelho = erro; swipe para cima para fechar)
+        Column(
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                .padding(top = 8.dp, start = 16.dp, end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            bannerMsg?.let { (msg, isError) ->
+                LaunchedEffect(msg) { delay(3500); bannerMsg = null }
+                BannerRow(msg, isError) { bannerMsg = null }
+            }
+            bannerMsg2?.let { (msg, isError) ->
+                LaunchedEffect(msg) { delay(3500); bannerMsg2 = null }
+                BannerRow(msg, isError) { bannerMsg2 = null }
+            }
+        }
+    }
+}
+
+// ── Banner de feedback ─────────────────────────────────────────────────────────
+@Composable
+private fun BannerRow(msg: String, isError: Boolean, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isError) RedBadge else DkGreen)
+            .pointerInput(msg) {
+                detectVerticalDragGestures { _, dragAmount ->
+                    if (dragAmount < -20f) onDismiss()
                 }
             }
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (isError) Icons.Filled.Error else Icons.Filled.CheckCircle,
+                null, tint = Color.White, modifier = Modifier.size(20.dp)
+            )
+            Text(msg, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
     }
 }
@@ -491,11 +565,35 @@ private fun SchedulerGrid(
     val draftCount = uiState.shifts.count { !it.published }
     // Ordenar pela ordem de inserção do weekAssignment (id crescente = quem entrou primeiro)
     val assignmentOrder = uiState.weekAssignments.sortedBy { it.id }.map { it.userId }
-    val displayedUsers = (
+    val allDisplayedUsers = (
         assignmentOrder.mapNotNull { uid -> uiState.users.find { it.id == uid } } +
         uiState.users.filter { it.id in displayedUserIds && it.id !in assignmentOrder }
     ).distinctBy { it.id }
     val availableUsers = uiState.users.filter { it.id !in displayedUserIds }
+
+    // Filtrar utilizadores por categoria
+    val now = remember { LocalDateTime.now() }
+    val displayedUsers = if (uiState.categoryFilter != null)
+        allDisplayedUsers.filter { it.category == uiState.categoryFilter }
+    else allDisplayedUsers
+
+    // Filtrar turnos por estado
+    fun shiftsForUser(userId: Int) = uiState.shifts.filter { it.userId == userId }.let { userShifts ->
+        val statusFilter = uiState.statusFilter
+        if (statusFilter == null || statusFilter == "Todos") userShifts
+        else userShifts.filter { shift ->
+            val s = computeShiftStatus(shift, uiState.attendanceRecords, now)
+            when (statusFilter) {
+                "Publicado" -> s == ShiftStatus.PUBLISHED
+                "Rascunho"  -> s == ShiftStatus.DRAFT
+                "Concluido" -> s == ShiftStatus.FINISHED
+                "Ausente"   -> s == ShiftStatus.ABSENT
+                "Atrasado"  -> s == ShiftStatus.LATE
+                "Em Turno"  -> s == ShiftStatus.ON_SHIFT
+                else        -> true
+            }
+        }
+    }
 
     Box(
         modifier = Modifier.fillMaxSize().pointerInput(Unit) {
@@ -597,13 +695,14 @@ private fun SchedulerGrid(
                 LazyColumn(modifier = Modifier.weight(1f)) {
                     // Linhas de funcionários
                     items(displayedUsers) { user ->
-                        val userShifts = uiState.shifts.filter { it.userId == user.id }
+                        val userShifts = shiftsForUser(user.id)
+                        val allUserShifts = uiState.shifts.filter { it.userId == user.id }
                         val maxPerDay = days.maxOfOrNull { day ->
                             userShifts.count { it.date.startsWith(dateStr(day)) }
                         }?.coerceAtLeast(1) ?: 1
                         val rowH = (70 * maxPerDay).dp
                         val lineClr = Color.White.copy(alpha = 0.10f)
-                        val totalHours = userShifts
+                        val totalHours = allUserShifts
                             .filter { it.published }
                             .sumOf { calcDurationHours(it.resolvedStartTime(), it.resolvedEndTime()) }
                         Row(
@@ -619,69 +718,99 @@ private fun SchedulerGrid(
                                 SchedAvatar(userInitials(user.name), userColor(user.id), userGradient(user.id), 32)
                                 Text(userInitials(user.name), color = TxtGray, fontSize = 9.sp,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (userShifts.isNotEmpty()) Text("${totalHours}h", color = TxtGray, fontSize = 9.sp)
+                                if (allUserShifts.isNotEmpty()) Text("${totalHours}h", color = TxtGray, fontSize = 9.sp)
                             }
                             days.forEach { day ->
                                 Box(modifier = Modifier.width(1.dp).fillMaxHeight().background(lineClr))
                                 val dayShifts = userShifts.filter { it.date.startsWith(dateStr(day)) }
+                                val dayAvail = uiState.availabilities.find {
+                                    it.userId == user.id && it.date.startsWith(dateStr(day))
+                                }
+                                val hasVacation = uiState.timeOffRequests.any { req ->
+                                    req.userId == user.id && req.status == "APPROVED" &&
+                                    runCatching {
+                                        val s = LocalDate.parse(req.startDate.substring(0, 10))
+                                        val e = LocalDate.parse(req.endDate.substring(0, 10))
+                                        !day.isBefore(s) && !day.isAfter(e)
+                                    }.getOrDefault(false)
+                                }
                                 Box(modifier = Modifier.weight(1f).fillMaxHeight().padding(2.dp)) {
-                                    Column(modifier = Modifier.fillMaxSize()) {
-                                        // Zona de turnos (ocupa o espaço disponível)
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .fillMaxWidth()
-                                                .let {
-                                                    if (dayShifts.isEmpty() && !isSelectMode)
-                                                        it.clickable { onEmptyClick(user, day) }
-                                                    else it
-                                                }
-                                        ) {
-                                            if (dayShifts.isNotEmpty()) {
-                                                Column(
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                                ) {
-                                                    dayShifts.forEach { shift ->
-                                                        Box(modifier = Modifier.weight(1f)) {
-                                                            ShiftCell(
-                                                                shift = shift,
-                                                                isSelected = shift.id in selectedShiftIds,
-                                                                isSelectMode = isSelectMode,
-                                                                onLongClick = { selectedShiftIds = selectedShiftIds + shift.id },
-                                                                onClick = {
-                                                                    if (isSelectMode) {
-                                                                        selectedShiftIds = if (shift.id in selectedShiftIds)
-                                                                            selectedShiftIds - shift.id
-                                                                        else
-                                                                            selectedShiftIds + shift.id
-                                                                    } else {
-                                                                        onShiftClick(shift)
+                                    if (hasVacation) {
+                                        VacationCell()
+                                    } else {
+                                        Column(modifier = Modifier.fillMaxSize()) {
+                                            // Zona de turnos (ocupa o espaço disponível)
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .fillMaxWidth()
+                                                    .let {
+                                                        if (dayShifts.isEmpty() && !isSelectMode)
+                                                            it.clickable { onEmptyClick(user, day) }
+                                                        else it
+                                                    }
+                                            ) {
+                                                if (dayShifts.isNotEmpty()) {
+                                                    Column(
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                                    ) {
+                                                        dayShifts.forEach { shift ->
+                                                            val shiftStatus = computeShiftStatus(shift, uiState.attendanceRecords, now)
+                                                            Box(modifier = Modifier.weight(1f)) {
+                                                                ShiftCell(
+                                                                    shift = shift,
+                                                                    status = shiftStatus,
+                                                                    isSelected = shift.id in selectedShiftIds,
+                                                                    isSelectMode = isSelectMode,
+                                                                    onLongClick = { selectedShiftIds = selectedShiftIds + shift.id },
+                                                                    onClick = {
+                                                                        if (isSelectMode) {
+                                                                            selectedShiftIds = if (shift.id in selectedShiftIds)
+                                                                                selectedShiftIds - shift.id
+                                                                            else
+                                                                                selectedShiftIds + shift.id
+                                                                        } else {
+                                                                            onShiftClick(shift)
+                                                                        }
                                                                     }
-                                                                }
-                                                            )
+                                                                )
+                                                            }
                                                         }
                                                     }
                                                 }
                                             }
-                                        }
-                                        // Zona "..." para adicionar turno — sempre visível fora do modo seleção
-                                        if (!isSelectMode) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(22.dp)
-                                                    .clickable { onEmptyClick(user, day) },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    "···",
-                                                    color = TxtGray.copy(alpha = 0.45f),
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
+                                            // Zona "..." para adicionar turno — sempre visível fora do modo seleção
+                                            if (!isSelectMode) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(22.dp)
+                                                        .clickable { onEmptyClick(user, day) },
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        "···",
+                                                        color = TxtGray.copy(alpha = 0.45f),
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
                                             }
                                         }
+                                    }
+                                    // Ponto de disponibilidade no canto superior direito
+                                    if (dayAvail != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    if (dayAvail.type == "UNAVAILABLE") Color(0xFFE53935)
+                                                    else DkGreen
+                                                )
+                                                .align(Alignment.TopEnd)
+                                        )
                                     }
                                 }
                             }
@@ -1099,18 +1228,56 @@ private fun SchedulerGrid(
     }
 }
 
+// ── Célula de férias ──────────────────────────────────────────────────────────
+@Composable
+private fun VacationCell() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(6.dp))
+            .background(DkGreen.copy(alpha = 0.15f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                Icons.Outlined.BeachAccess,
+                contentDescription = null,
+                tint = DkGreen,
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                "Férias",
+                color = DkGreen,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
 // ── Célula de turno ───────────────────────────────────────────────────────────
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ShiftCell(
     shift: Shift,
+    status: ShiftStatus = ShiftStatus.PUBLISHED,
     isSelected: Boolean = false,
     isSelectMode: Boolean = false,
     onLongClick: () -> Unit = {},
     onClick: () -> Unit
 ) {
-    val cellColor = shiftCellColor(shift.resolvedStartTime(), shift.published)
+    val cellColor = shiftCellColor(shift.published, shift.userId)
     val textAlpha = if (shift.published) 1f else 0.55f
+    val statusDotColor = when (status) {
+        ShiftStatus.ON_SHIFT  -> DkGreen
+        ShiftStatus.LATE      -> Orange
+        ShiftStatus.FINISHED  -> TxtGray
+        ShiftStatus.ABSENT    -> RedBadge
+        else                  -> Color.Transparent
+    }
     Box(
         modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp))
             .background(if (isSelected) Blue.copy(alpha = 0.35f) else cellColor)
@@ -1136,6 +1303,14 @@ private fun ShiftCell(
                 Icons.Outlined.Lock, null,
                 tint = Color.White.copy(alpha = 0.4f),
                 modifier = Modifier.size(10.dp).align(Alignment.BottomEnd)
+            )
+        } else if (statusDotColor != Color.Transparent) {
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(statusDotColor)
+                    .align(Alignment.BottomEnd)
             )
         }
     }
@@ -1564,8 +1739,8 @@ private fun EditarTurnoScreen(
 private fun PublicarHorarioScreen(
     uiState: SchedulerUiState,
     onBack: () -> Unit,
-    onSuccess: (String) -> Unit,
-    onPublishMultiple: (List<Int>, (Boolean, String) -> Unit) -> Unit
+    onPublishDone: (okCount: Int, failCount: Int) -> Unit,
+    onPublishMultiple: (List<Int>, (Int, Int) -> Unit) -> Unit
 ) {
     var notifyOption by remember { mutableStateOf(0) }
     val drafts = uiState.shifts.filter { !it.published }
@@ -1652,7 +1827,7 @@ private fun PublicarHorarioScreen(
             Button(
                 onClick = {
                     val ids = drafts.indices.filter { selected[it] }.map { drafts[it].id }
-                    onPublishMultiple(ids) { _, msg -> onSuccess(msg) }
+                    onPublishMultiple(ids) { ok, fail -> onPublishDone(ok, fail) }
                 },
                 enabled = selCount > 0,
                 modifier = Modifier.fillMaxWidth(),
@@ -1789,30 +1964,37 @@ private fun AddShiftScreen(
 
 // ── Ecrã: Filtrar ─────────────────────────────────────────────────────────────
 @Composable
-private fun FilterScreen(onBack: () -> Unit, onPositionClick: () -> Unit, onSuccess: () -> Unit) {
-    val statusSel = remember { mutableStateListOf(*Array(STATUS_FILTERS.size) { false }) }
-    var warnSel by remember { mutableStateOf(false) }
+private fun FilterScreen(
+    currentStatus: String?,
+    currentCategory: String?,
+    uiState: SchedulerUiState,
+    onBack: () -> Unit,
+    onPositionClick: (statusToSave: String?) -> Unit = {},
+    onApply: (status: String?, category: String?) -> Unit
+) {
+    var selectedStatus by remember { mutableStateOf(currentStatus) }
 
     Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).padding(bottom = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("Cancelar", color = Blue, fontSize = 16.sp) }
             Text("Filtrar", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-            TextButton(onClick = { statusSel.indices.forEach { statusSel[it] = false }; warnSel = false }) {
+            TextButton(onClick = { selectedStatus = null; onApply(null, null) }) {
                 Text("Repor", color = Blue, fontSize = 16.sp)
             }
         }
         LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
             item {
-                Text("POSICAO", color = TxtGray, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                Text("CATEGORIA", color = TxtGray, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                     letterSpacing = 0.8.sp, modifier = Modifier.padding(bottom = 10.dp))
+                val catLabel = if (currentCategory != null) categoryLabel(currentCategory) else "Todos"
                 Column(modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(DkSurface)) {
-                    Row(modifier = Modifier.fillMaxWidth().clickable { onPositionClick() }
+                    Row(modifier = Modifier.fillMaxWidth().clickable { onPositionClick(selectedStatus) }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Posicoes", color = Color.White, fontSize = 15.sp)
+                        Text("Categorias", color = Color.White, fontSize = 15.sp)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Todos", color = TxtGray, fontSize = 15.sp)
+                            Text(catLabel, color = TxtGray, fontSize = 15.sp)
                             Icon(Icons.Outlined.ChevronRight, null, tint = TxtGray, modifier = Modifier.size(16.dp))
                         }
                     }
@@ -1822,37 +2004,25 @@ private fun FilterScreen(onBack: () -> Unit, onPositionClick: () -> Unit, onSucc
                     letterSpacing = 0.8.sp, modifier = Modifier.padding(bottom = 10.dp))
                 Column(modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(DkSurface)) {
                     STATUS_FILTERS.forEachIndexed { i, (label, icon, color) ->
-                        Row(modifier = Modifier.fillMaxWidth().clickable { statusSel[i] = !statusSel[i] }
+                        val isSelected = if (label == "Todos") selectedStatus == null else selectedStatus == label
+                        Row(modifier = Modifier.fillMaxWidth()
+                            .clickable { selectedStatus = if (label == "Todos") null else label }
                             .padding(horizontal = 16.dp, vertical = 14.dp),
                             horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                                 Icon(icon, null, tint = color, modifier = Modifier.size(22.dp))
                                 Text(label, color = Color.White, fontSize = 15.sp)
                             }
-                            RadioDot(checked = statusSel[i])
+                            RadioDot(checked = isSelected)
                         }
                         if (i < STATUS_FILTERS.lastIndex) Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                    }
-                }
-                Spacer(Modifier.height(16.dp))
-                Text("AVISOS", color = TxtGray, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.8.sp, modifier = Modifier.padding(bottom = 10.dp))
-                Column(modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(DkSurface)) {
-                    Row(modifier = Modifier.fillMaxWidth().clickable { warnSel = !warnSel }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Icon(Icons.Outlined.Warning, null, tint = Orange, modifier = Modifier.size(22.dp))
-                            Text("Tem avisos", color = Color.White, fontSize = 15.sp)
-                        }
-                        RadioDot(checked = warnSel)
                     }
                 }
                 Spacer(Modifier.height(20.dp))
             }
         }
         Box(modifier = Modifier.fillMaxWidth().background(DkBg).padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Button(onClick = onSuccess, modifier = Modifier.fillMaxWidth(),
+            Button(onClick = { onApply(selectedStatus, currentCategory) }, modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Blue)) {
                 Text("Aplicar", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
             }
@@ -1862,46 +2032,60 @@ private fun FilterScreen(onBack: () -> Unit, onPositionClick: () -> Unit, onSucc
 
 // ── Ecrã: Filtrar por categoria ───────────────────────────────────────────────
 @Composable
-private fun PositionFilterScreen(uiState: SchedulerUiState, onBack: () -> Unit) {
-    val categories = listOf("VETERINARIAN","NURSE","OPERATIONAL","ADMINISTRATIVE")
-    var allSelected by remember { mutableStateOf(true) }
-    val catSel = remember { mutableStateListOf(*Array(categories.size) { false }) }
-    val catColors = listOf(Color(0xFF27AE60), Color(0xFF2980B9), Color(0xFFE67E22), Color(0xFF8E44AD))
+private fun PositionFilterScreen(
+    uiState: SchedulerUiState,
+    currentCategory: String?,
+    onApply: (category: String?) -> Unit,
+    onBack: () -> Unit
+) {
+    // Only show categories that exist among current users
+    val categories = uiState.users.map { it.category }.distinct().sorted()
+    val catColors = mapOf(
+        "VETERINARIAN"   to Color(0xFF27AE60),
+        "NURSE"          to Color(0xFF2980B9),
+        "OPERATIONAL"    to Color(0xFFE67E22),
+        "ADMINISTRATIVE" to Color(0xFF8E44AD)
+    )
+    var selected by remember { mutableStateOf(currentCategory) }
 
     Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).padding(bottom = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("Cancelar", color = Blue, fontSize = 16.sp) }
             Text("Categoria", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(70.dp))
+            TextButton(onClick = { selected = null; onApply(null) }) {
+                Text("Repor", color = Blue, fontSize = 16.sp)
+            }
         }
         LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
             item {
                 Column(modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(DkSurface)) {
                     Row(modifier = Modifier.fillMaxWidth()
-                        .clickable { allSelected = true; catSel.indices.forEach { catSel[it] = false } }
+                        .clickable { selected = null; onApply(null) }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Todos", color = Color.White, fontSize = 15.sp)
-                        RadioDot(checked = allSelected)
+                        RadioDot(checked = selected == null)
                     }
                 }
-                Spacer(Modifier.height(16.dp))
-                Text("CATEGORIAS", color = TxtGray, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.8.sp, modifier = Modifier.padding(bottom = 10.dp))
-                Column(modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(DkSurface)) {
-                    categories.forEachIndexed { i, cat ->
-                        Row(modifier = Modifier.fillMaxWidth()
-                            .clickable { allSelected = false; catSel[i] = !catSel[i] }
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Box(modifier = Modifier.size(14.dp).clip(CircleShape).background(catColors[i]))
-                                Text(categoryLabel(cat), color = Color.White, fontSize = 15.sp)
+                if (categories.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("CATEGORIAS", color = TxtGray, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp, modifier = Modifier.padding(bottom = 10.dp))
+                    Column(modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(DkSurface)) {
+                        categories.forEachIndexed { i, cat ->
+                            Row(modifier = Modifier.fillMaxWidth()
+                                .clickable { selected = cat; onApply(cat) }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Box(modifier = Modifier.size(14.dp).clip(CircleShape).background(catColors[cat] ?: TxtGray))
+                                    Text(categoryLabel(cat), color = Color.White, fontSize = 15.sp)
+                                }
+                                RadioDot(checked = selected == cat)
                             }
-                            RadioDot(checked = catSel[i])
+                            if (i < categories.lastIndex) Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
                         }
-                        if (i < categories.lastIndex) Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
                     }
                 }
             }
@@ -1925,6 +2109,15 @@ private fun UserScheduleScreen(
         .sortedBy { it.date }
     val totalHours = userShifts.sumOf { calcDurationHours(it.resolvedStartTime(), it.resolvedEndTime()) }
     val today = LocalDate.now()
+    val weekEnd = weekStart.plusDays(6)
+    val userTimeOff = uiState.timeOffRequests.filter { req ->
+        req.userId == user.id && req.status == "APPROVED" &&
+        runCatching {
+            val s = LocalDate.parse(req.startDate.substring(0, 10))
+            val e = LocalDate.parse(req.endDate.substring(0, 10))
+            s <= weekEnd && e >= weekStart
+        }.getOrDefault(false)
+    }
 
     Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
         // Cabeçalho
@@ -1973,7 +2166,7 @@ private fun UserScheduleScreen(
         }
         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
 
-        if (userShifts.isEmpty()) {
+        if (userShifts.isEmpty() && userTimeOff.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Sem turnos esta semana", color = TxtGray, fontSize = 15.sp)
             }
@@ -1983,12 +2176,51 @@ private fun UserScheduleScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // Férias (aprovadas) que cobrem esta semana
+                items(userTimeOff) { req ->
+                    val torStart = runCatching { LocalDate.parse(req.startDate.substring(0, 10)) }.getOrNull() ?: weekStart
+                    val torEnd   = runCatching { LocalDate.parse(req.endDate.substring(0, 10)) }.getOrNull() ?: weekEnd
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF1B5E20).copy(alpha = 0.35f))
+                            .border(1.dp, DkGreen.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(4.dp)
+                                .height(64.dp)
+                                .background(DkGreen, RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp))
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Icon(
+                            Icons.Outlined.BeachAccess,
+                            contentDescription = null,
+                            tint = DkGreen,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f).padding(vertical = 10.dp)) {
+                            Text("Férias", color = DkGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            val fmt = DateTimeFormatter.ofPattern("d MMM", java.util.Locale("pt", "PT"))
+                            Text(
+                                "${torStart.format(fmt)} – ${torEnd.format(fmt)}",
+                                color = Color.White.copy(alpha = 0.75f),
+                                fontSize = 12.sp
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                    }
+                }
+
                 items(userShifts) { shift ->
                     val shiftDate = try {
                         LocalDate.parse(shift.date.take(10))
                     } catch (e: Exception) { weekStart }
                     val isToday = shiftDate == today
-                    val accentColor = shiftCellColor(shift.resolvedStartTime(), true)
+                    val accentColor = shiftCellColor(true, shift.userId)
                     val hours = calcDurationHours(shift.resolvedStartTime(), shift.resolvedEndTime())
 
                     Row(

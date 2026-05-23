@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import pt.ualg.miaugenda.data.model.AttendanceRecord
+import pt.ualg.miaugenda.data.model.CreateAttendanceBody
 import pt.ualg.miaugenda.data.remote.RetrofitClient
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -124,7 +125,7 @@ fun CheckInScreen(
 
                         try {
                             val response = attendanceApi.register(
-                                mapOf("type" to "IN")
+                                CreateAttendanceBody(type = "IN")
                             )
 
                             if (response.isSuccessful) {
@@ -151,7 +152,7 @@ fun CheckInScreen(
 
                         try {
                             val response = attendanceApi.register(
-                                mapOf("type" to "OUT")
+                                CreateAttendanceBody(type = "OUT")
                             )
 
                             if (response.isSuccessful) {

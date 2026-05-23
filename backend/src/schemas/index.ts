@@ -58,8 +58,38 @@ export const updateShiftTypeSchema = z.object({
   { message: 'At least one field must be provided' }
 )
 
+export const createTimeOffRequestSchema = z.object({
+  startDate: z.string().regex(dateRegex, 'startDate must be in YYYY-MM-DD format'),
+  endDate: z.string().regex(dateRegex, 'endDate must be in YYYY-MM-DD format'),
+  allDay: z.boolean().default(true),
+  reason: z.string().trim().optional()
+}).refine(
+  data => new Date(data.endDate) >= new Date(data.startDate),
+  { message: 'endDate must be on or after startDate' }
+)
+
+export const updateRequestStatusSchema = z.object({
+  status: z.enum(['APPROVED', 'REJECTED'], { message: 'status must be APPROVED or REJECTED' })
+})
+
+export const createShiftSwapRequestSchema = z.object({
+  requesterShiftId: z.coerce.number().int().positive('requesterShiftId must be a positive integer'),
+  targetShiftId: z.coerce.number().int().positive('targetShiftId must be a positive integer'),
+  reason: z.string().trim().optional()
+}).refine(
+  data => data.requesterShiftId !== data.targetShiftId,
+  { message: 'requesterShiftId and targetShiftId must be different shifts' }
+)
+
+export const createAvailabilitySchema = z.object({
+  date: z.string().regex(dateRegex, 'date must be in YYYY-MM-DD format'),
+  type: z.enum(['PREFERRED', 'UNAVAILABLE'], { message: 'type must be PREFERRED or UNAVAILABLE' }),
+  note: z.string().trim().optional()
+})
+
 export const createAttendanceSchema = z.object({
-  type: z.enum(['IN', 'OUT'], { message: 'type must be IN or OUT' })
+  type: z.enum(['IN', 'OUT'], { message: 'type must be IN or OUT' }),
+  note: z.string().trim().optional()
 })
 
 export const updateAttendanceSchema = z.object({

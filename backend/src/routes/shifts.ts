@@ -267,7 +267,7 @@ router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
  */
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { week, month } = req.query
+    const { week, month, userId } = req.query
 
     if (!week && !month) {
       return res.status(400).json({
@@ -314,8 +314,13 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       end = range.end
     }
 
+    const userIdFilter = userId ? parseInt(userId as string) : undefined
+
     const shifts = await prisma.shift.findMany({
-      where: { date: { gte: start, lte: end } },
+      where: {
+        date: { gte: start, lte: end },
+        ...(userIdFilter ? { userId: userIdFilter } : {})
+      },
       include: {
         user: { select: { id: true, name: true, employeeNumber: true, role: true, category: true } },
         shiftType: true

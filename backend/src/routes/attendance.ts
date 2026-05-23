@@ -277,31 +277,23 @@ router.get('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Respo
   try {
     const { userId, from, to } = req.query
 
-    if (!userId) {
-      return res.status(400).json({ message: 'userId query param is required' })
+    const where: any = {}
+
+    if (userId) {
+      const userIdNum = Number(userId)
+      if (!Number.isInteger(userIdNum) || userIdNum <= 0) {
+        return res.status(400).json({ message: 'userId must be a valid integer' })
+      }
+      const user = await prisma.user.findUnique({ where: { id: userIdNum } })
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' })
+      }
+      where.userId = userIdNum
     }
-
-    const userIdNum = Number(userId)
-
-    if (!Number.isInteger(userIdNum) || userIdNum <= 0) {
-      return res.status(400).json({ message: 'userId must be a valid integer' })
-    }
-
-    const user = await prisma.user.findUnique({ where: { id: userIdNum } })
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' })
-    }
-
-    const where: any = { userId: userIdNum }
 
     if (from || to) {
       where.timestamp = {}
-
-      if (from) {
-        where.timestamp.gte = new Date(from as string)
-      }
-
+      if (from) where.timestamp.gte = new Date(from as string)
       if (to) {
         const toDate = new Date(to as string)
         toDate.setUTCHours(23, 59, 59, 999)

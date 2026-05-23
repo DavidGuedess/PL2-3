@@ -101,7 +101,7 @@ export const getAttendanceReport = async (req: Request, res: Response, next: Nex
 
 export const createAttendance = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { type } = req.body
+    const { type, note } = req.body
     const userId = req.user!.userId
 
     const lastRecord = await prisma.attendanceRecord.findFirst({
@@ -124,7 +124,8 @@ export const createAttendance = async (req: Request, res: Response, next: NextFu
     const record = await prisma.attendanceRecord.create({
       data: {
         userId,
-        type
+        type,
+        ...(note ? { note } : {})
       },
       include: {
         user: {
