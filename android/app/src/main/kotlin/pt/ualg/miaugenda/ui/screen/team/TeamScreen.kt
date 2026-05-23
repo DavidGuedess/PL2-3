@@ -69,7 +69,7 @@ private sealed class TeamSubScreen {
 
 @Composable
 fun TeamScreen(
-    onBack: () -> Unit,
+    onBack: () -> Unit = {},
     onNavigateToHome: () -> Unit = {},
     onNavigateToScheduler: () -> Unit = {},
     onNavigateToInbox: () -> Unit = {},
@@ -86,7 +86,6 @@ fun TeamScreen(
 
     when (val s = subScreen) {
         is TeamSubScreen.List -> TeamListScreen(
-            onBack = onBack,
             onEmployeeClick = { subScreen = TeamSubScreen.Detail(it) },
             onAddEmployee = { subScreen = TeamSubScreen.AddEmployee },
             onNavEquipa = { subScreen = TeamSubScreen.List },
@@ -115,7 +114,6 @@ fun TeamScreen(
 
 @Composable
 private fun TeamListScreen(
-    onBack: () -> Unit,
     onEmployeeClick: (User) -> Unit,
     onAddEmployee: () -> Unit,
     onNavEquipa: () -> Unit = {},
@@ -145,19 +143,15 @@ private fun TeamListScreen(
     // agrupar em linhas de 3
     val rows = filtered.chunked(3)
 
-    Box(modifier = Modifier.fillMaxSize().background(DkBg)) {
+    Box(modifier = Modifier.fillMaxSize().background(DkBg).systemBarsPadding()) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Barra de topo
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Voltar", tint = Color.White)
-                }
                 Text(
                     "A Minha Equipa",
                     color = Color.White,
@@ -165,6 +159,9 @@ private fun TeamListScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
                 )
+                IconButton(onClick = onAddEmployee) {
+                    Icon(Icons.Default.Add, contentDescription = "Adicionar funcionário", tint = Color.White)
+                }
             }
 
             // Barra de pesquisa
@@ -227,34 +224,13 @@ private fun TeamListScreen(
 
             // Barra de navegação em baixo
             AppBottomNav(
-                active                = NavTab.MENU,
-                onHomeClick           = onNavigateToHome,
-                onSchedulerClick      = onNavigateToScheduler,
-                onInboxClick          = onNavigateToInbox,
-                onNotificationsClick  = onNavigateToNotifications,
-                onMenuClick           = onNavEquipa
+                active               = NavTab.MENU,
+                onHomeClick          = onNavigateToHome,
+                onSchedulerClick     = onNavigateToScheduler,
+                onInboxClick         = onNavigateToInbox,
+                onNotificationsClick = onNavigateToNotifications,
+                onMenuClick          = onNavEquipa
             )
-        }
-
-        // FAB centrado acima da barra de navegação
-        FloatingActionButton(
-            onClick = onAddEmployee,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 80.dp)
-                .fillMaxWidth(fraction = 0.80f),
-            containerColor = Blue,
-            contentColor = Color.White,
-            shape = RoundedCornerShape(50.dp)
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(22.dp))
-                Text("Adicionar Funcionário", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
         }
     }
 }
@@ -404,11 +380,6 @@ private fun EmployeeDetailScreen(
                     label = "Mensagem",
                     onClick = {}
                 )
-                ActionButton(
-                    icon = Icons.Outlined.Star,
-                    label = "Medalhas",
-                    onClick = {}
-                )
             }
 
             // Campos de info
@@ -541,16 +512,23 @@ private fun EmployeeCalendarScreen(user: User, onBack: () -> Unit) {
 
     LaunchedEffect(user.id) {
         try {
-            val resp = RetrofitClient.shiftApi.getShifts(userId = user.id)
-            if (resp.isSuccessful) {
-                shifts = (resp.body() ?: emptyList())
-                    .filter { it.published }
-                    .filter {
-                        val d = runCatching { LocalDate.parse(it.date.substring(0, 10)) }.getOrNull()
-                        d != null && !d.isBefore(today)
-                    }
-                    .sortedBy { it.date }
+            // Carregar mês atual + 2 meses seguintes (backend exige week ou month param)
+            val months = (0..2).map { java.time.YearMonth.now().plusMonths(it.toLong()) }
+            val allShifts = mutableListOf<pt.ualg.miaugenda.data.model.Shift>()
+            for (m in months) {
+                val resp = RetrofitClient.shiftApi.getShifts(
+                    month  = m.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM")),
+                    userId = user.id
+                )
+                if (resp.isSuccessful) allShifts.addAll(resp.body() ?: emptyList())
             }
+            shifts = allShifts
+                .filter { it.published }
+                .filter {
+                    val d = runCatching { LocalDate.parse(it.date.substring(0, 10)) }.getOrNull()
+                    d != null && !d.isBefore(today)
+                }
+                .sortedBy { it.date }
         } catch (_: Exception) {}
         isLoading = false
     }

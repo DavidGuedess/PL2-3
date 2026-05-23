@@ -20,6 +20,7 @@ import pt.ualg.miaugenda.data.model.AttendanceRecord
 import pt.ualg.miaugenda.data.model.Shift
 import pt.ualg.miaugenda.data.model.resolvedEndTime
 import pt.ualg.miaugenda.data.model.resolvedStartTime
+import pt.ualg.miaugenda.data.model.CreateAttendanceBody
 import pt.ualg.miaugenda.data.remote.RetrofitClient
 import java.time.DayOfWeek
 import java.time.Instant
@@ -149,7 +150,7 @@ fun CheckInScreen(
 
                         try {
                             val response = attendanceApi.register(
-                                mapOf("type" to "IN")
+                                CreateAttendanceBody(type = "IN")
                             )
 
                             if (response.isSuccessful) {
@@ -176,7 +177,7 @@ fun CheckInScreen(
 
                         try {
                             val response = attendanceApi.register(
-                                mapOf("type" to "OUT")
+                                CreateAttendanceBody(type = "OUT")
                             )
 
                             if (response.isSuccessful) {

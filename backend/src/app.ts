@@ -6,6 +6,9 @@ import shiftsRoutes from './routes/shifts'
 import attendanceRoutes from './routes/attendance'
 import weekAssignmentsRoutes from './routes/weekAssignments'
 import channelsRoutes from './routes/channels'
+import timeOffRequestsRoutes from './routes/timeOffRequests'
+import shiftSwapRequestsRoutes from './routes/shiftSwapRequests'
+import availabilityRoutes from './routes/availability'
 import { errorHandler } from './middleware/errorHandler'
 
 const app = express()
@@ -23,6 +26,9 @@ app.use('/shifts', shiftsRoutes)
 app.use('/attendance', attendanceRoutes)
 app.use('/week-assignments', weekAssignmentsRoutes)
 app.use('/channels', channelsRoutes)
+app.use('/time-off-requests', timeOffRequestsRoutes)
+app.use('/shift-swap-requests', shiftSwapRequestsRoutes)
+app.use('/availability', availabilityRoutes)
 
 app.use(errorHandler)
 

@@ -9,10 +9,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import pt.ualg.miaugenda.MiauGendaApp
+import pt.ualg.miaugenda.data.model.AttendanceRecord
 import pt.ualg.miaugenda.data.model.CreateShiftRequest
 import pt.ualg.miaugenda.data.model.CreateUserRequest
 import pt.ualg.miaugenda.data.model.CreateWeekAssignmentRequest
 import pt.ualg.miaugenda.data.model.Shift
+import pt.ualg.miaugenda.data.model.Availability
+import pt.ualg.miaugenda.data.model.TimeOffRequest
 import pt.ualg.miaugenda.data.model.resolvedStartTime
 import pt.ualg.miaugenda.data.model.resolvedEndTime
 import pt.ualg.miaugenda.data.model.ShiftType
@@ -28,6 +31,11 @@ data class SchedulerUiState(
     val users: List<User> = emptyList(),
     val shiftTypes: List<ShiftType> = emptyList(),
     val weekAssignments: List<WeekAssignment> = emptyList(),
+    val timeOffRequests: List<TimeOffRequest> = emptyList(),
+    val availabilities: List<Availability> = emptyList(),
+    val attendanceRecords: List<AttendanceRecord> = emptyList(),
+    val statusFilter: String? = null,
+    val categoryFilter: String? = null,
     val isLoading: Boolean = true,
     val error: String? = null
 )
@@ -59,20 +67,31 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 val weekStr = weekStart.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
+                val weekEndStr = weekStart.plusDays(6).format(DateTimeFormatter.ISO_LOCAL_DATE)
+
                 if (userRole == "EMPLOYEE") {
                     // Funcionarios so veem os seus proprios turnos
-                    val shiftsD     = async { RetrofitClient.shiftApi.getMyShifts(week = weekStr) }
-                    val shiftTypesD = async { RetrofitClient.shiftApi.getShiftTypes() }
+                    val shiftsD  = async { RetrofitClient.shiftApi.getMyShifts(week = weekStr) }
+                    val stD      = async { RetrofitClient.shiftApi.getShiftTypes() }
+                    val torD     = async { RetrofitClient.requestApi.getTimeOffRequests() }
+                    val availD   = async { RetrofitClient.availabilityApi.getAvailabilities(startDate = weekStr, endDate = weekEndStr) }
+                    val attD     = async { RetrofitClient.attendanceApi.getMyHistory(from = weekStr, to = weekEndStr) }
 
-                    val sR  = shiftsD.await()
-                    val stR = shiftTypesD.await()
+                    val sR   = shiftsD.await()
+                    val stR  = stD.await()
+                    val torR = torD.await()
+                    val avR  = availD.await()
+                    val attR = attD.await()
 
                     if (sR.isSuccessful && stR.isSuccessful) {
                         _uiState.value = _uiState.value.copy(
-                            shifts     = sR.body().orEmpty(),
-                            users      = emptyList(),
-                            shiftTypes = stR.body().orEmpty(),
-                            isLoading  = false
+                            shifts             = sR.body().orEmpty(),
+                            users              = emptyList(),
+                            shiftTypes         = stR.body().orEmpty(),
+                            timeOffRequests    = if (torR.isSuccessful) torR.body().orEmpty() else emptyList(),
+                            availabilities     = if (avR.isSuccessful) avR.body().orEmpty() else emptyList(),
+                            attendanceRecords  = if (attR.isSuccessful) attR.body().orEmpty() else emptyList(),
+                            isLoading          = false
                         )
                     } else {
                         _uiState.value = _uiState.value.copy(
@@ -82,23 +101,32 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 } else {
                     // ADMIN e MANAGER veem todos os turnos e utilizadores
-                    val shiftsD     = async { RetrofitClient.shiftApi.getShifts(week = weekStr) }
-                    val usersD      = async { RetrofitClient.userApi.getUsers() }
-                    val shiftTypesD = async { RetrofitClient.shiftApi.getShiftTypes() }
-                    val waD         = async { RetrofitClient.weekAssignmentApi.getWeekAssignments(week = weekStr) }
+                    val shiftsD = async { RetrofitClient.shiftApi.getShifts(week = weekStr) }
+                    val usersD  = async { RetrofitClient.userApi.getUsers() }
+                    val stD     = async { RetrofitClient.shiftApi.getShiftTypes() }
+                    val waD     = async { RetrofitClient.weekAssignmentApi.getWeekAssignments(week = weekStr) }
+                    val torD    = async { RetrofitClient.requestApi.getTimeOffRequests() }
+                    val availD  = async { RetrofitClient.availabilityApi.getAvailabilities(startDate = weekStr, endDate = weekEndStr) }
+                    val attD    = async { RetrofitClient.attendanceApi.getAttendance(from = weekStr, to = weekEndStr) }
 
-                    val sR  = shiftsD.await()
-                    val uR  = usersD.await()
-                    val stR = shiftTypesD.await()
-                    val waR = waD.await()
+                    val sR   = shiftsD.await()
+                    val uR   = usersD.await()
+                    val stR  = stD.await()
+                    val waR  = waD.await()
+                    val torR = torD.await()
+                    val avR  = availD.await()
+                    val attR = attD.await()
 
                     if (sR.isSuccessful && uR.isSuccessful && stR.isSuccessful) {
                         _uiState.value = _uiState.value.copy(
-                            shifts          = sR.body().orEmpty(),
-                            users           = uR.body().orEmpty(),
-                            shiftTypes      = stR.body().orEmpty(),
-                            weekAssignments = waR.body().orEmpty(),
-                            isLoading       = false
+                            shifts             = sR.body().orEmpty(),
+                            users              = uR.body().orEmpty(),
+                            shiftTypes         = stR.body().orEmpty(),
+                            weekAssignments    = waR.body().orEmpty(),
+                            timeOffRequests    = if (torR.isSuccessful) torR.body().orEmpty() else emptyList(),
+                            availabilities     = if (avR.isSuccessful) avR.body().orEmpty() else emptyList(),
+                            attendanceRecords  = if (attR.isSuccessful) attR.body().orEmpty() else emptyList(),
+                            isLoading          = false
                         )
                     } else {
                         _uiState.value = _uiState.value.copy(
@@ -200,7 +228,7 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun publishMultipleShifts(shiftIds: List<Int>, onResult: (Boolean, String) -> Unit) {
+    fun publishMultipleShifts(shiftIds: List<Int>, onResult: (okCount: Int, failCount: Int) -> Unit) {
         viewModelScope.launch {
             try {
                 val results = shiftIds.map { id ->
@@ -212,16 +240,10 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
                 val ok   = results.count { it.isSuccessful }
                 val fail = results.count { !it.isSuccessful }
 
-                _uiState.value = _uiState.value.copy(
-                    shifts = _uiState.value.shifts.map {
-                        if (shiftIds.contains(it.id)) it.copy(published = true) else it
-                    }
-                )
-
-                if (fail == 0) onResult(true, "$ok turnos publicados com sucesso")
-                else           onResult(true, "$ok publicados, $fail com erro")
+                loadWeek()
+                onResult(ok, fail)
             } catch (e: Exception) {
-                onResult(false, "Sem ligacao ao servidor")
+                onResult(0, shiftIds.size)
             }
         }
     }
@@ -353,6 +375,10 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
                 onResult(false, "Sem ligacao ao servidor")
             }
         }
+    }
+
+    fun setFilters(status: String?, category: String?) {
+        _uiState.value = _uiState.value.copy(statusFilter = status, categoryFilter = category)
     }
 
     fun getCurrentWeek(): LocalDate = currentWeek

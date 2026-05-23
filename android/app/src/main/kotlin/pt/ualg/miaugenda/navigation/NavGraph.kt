@@ -91,6 +91,9 @@ fun NavGraph(
                 },
                 onEquipaClick = {
                     navController.navigate(Screen.Team.route)
+                },
+                onAvailabilityClick = {
+                    navController.navigate(Screen.Availability.route)
                 }
             )
         }
@@ -147,7 +150,9 @@ fun NavGraph(
             val context = LocalContext.current
             val tokenManager = MiauGendaApp.getTokenManager(context)
             NotificationsScreen(
-                managerName = tokenManager.getUserName() ?: "Gerente",
+                currentUserId = tokenManager.getUserId(),
+                currentRole = tokenManager.getUserRole() ?: "EMPLOYEE",
+                currentUserName = tokenManager.getUserName() ?: "",
                 onNavigateToScheduler = {
                     navController.navigate(Screen.Scheduler.route) {
                         popUpTo(Screen.Scheduler.route) { inclusive = true }
@@ -219,27 +224,10 @@ fun NavGraph(
 
         composable(Screen.Team.route) {
             TeamScreen(
-                onBack = { navController.popBackStack() },
-                onNavigateToHome = {
-                    navController.navigate(Screen.Dashboard.route) {
-                        popUpTo(Screen.Dashboard.route) { inclusive = true }
-                    }
-                },
-                onNavigateToScheduler = {
-                    navController.navigate(Screen.Scheduler.route) {
-                        popUpTo(Screen.Scheduler.route) { inclusive = true }
-                    }
-                },
-                onNavigateToInbox = {
-                    navController.navigate(Screen.Inbox.route) {
-                        popUpTo(Screen.Inbox.route) { inclusive = true }
-                    }
-                },
-                onNavigateToNotifications = {
-                    navController.navigate(Screen.Notifications.route) {
-                        popUpTo(Screen.Notifications.route) { inclusive = true }
-                    }
-                }
+                onNavigateToHome          = { navController.navigate(Screen.Dashboard.route) { launchSingleTop = true } },
+                onNavigateToScheduler     = { navController.navigate(Screen.Scheduler.route) { launchSingleTop = true } },
+                onNavigateToInbox         = { navController.navigate(Screen.Inbox.route) { launchSingleTop = true } },
+                onNavigateToNotifications = { navController.navigate(Screen.Notifications.route) { launchSingleTop = true } }
             )
         }
     }
