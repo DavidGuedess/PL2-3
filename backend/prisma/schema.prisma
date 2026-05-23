@@ -25,6 +25,12 @@ enum AvailabilityType {
   UNAVAILABLE
 }
 
+enum ChannelType {
+  GROUP
+  ANNOUNCEMENT
+  DM
+}
+
 enum RequestStatus {
   PENDING
   APPROVED
@@ -113,6 +119,7 @@ model Channel {
   name        String          @unique
   description String?
   isPublic    Boolean         @default(true)
+  type        ChannelType     @default(GROUP)
   createdById Int
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
@@ -134,11 +141,11 @@ model ChannelMember {
 
 model Message {
   id        Int      @id @default(autoincrement())
-  channelId Int
+  channelId Int?
   userId    Int
   content   String
   createdAt DateTime @default(now())
-  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channel   Channel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([channelId, createdAt])

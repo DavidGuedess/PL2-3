@@ -42,23 +42,35 @@ export const getChannels = async (req: Request, res: Response, next: NextFunctio
 export const createChannel = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId
-    const { name, description, isPublic = true } = req.body
+    const role = req.user!.role
+    const { name, description, isPublic, type = 'GROUP', memberIds = [] } = req.body
+
+    // Only ADMIN/MANAGER can create GROUP or ANNOUNCEMENT channels
+    if (type !== 'DM' && role === 'EMPLOYEE') {
+      return res.status(403).json({ message: 'Sem permissão para criar este tipo de canal' })
+    }
 
     if (!name?.trim()) {
       return res.status(400).json({ message: 'Nome do canal é obrigatório' })
     }
 
+    const derivedIsPublic = isPublic !== undefined ? isPublic : type === 'ANNOUNCEMENT'
+
     const channel = await prisma.channel.create({
       data: {
         name: name.trim(),
         description: description?.trim() || null,
-        isPublic,
+        isPublic: derivedIsPublic,
+        type: type as any,
         createdById: userId
       }
     })
 
-    await prisma.channelMember.create({
-      data: { channelId: channel.id, userId }
+    // Add creator + requested members
+    const memberSet = new Set<number>([userId, ...(memberIds as number[])])
+    await prisma.channelMember.createMany({
+      data: Array.from(memberSet).map(uid => ({ channelId: channel.id, userId: uid })),
+      skipDuplicates: true
     })
 
     return res.status(201).json(channel)
@@ -66,6 +78,38 @@ export const createChannel = async (req: Request, res: Response, next: NextFunct
     if (err.code === 'P2002') {
       return res.status(409).json({ message: 'Já existe um canal com esse nome' })
     }
+    next(err)
+  }
+}
+
+export const deleteChannel = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.userId
+    const role = req.user!.role
+    const channelId = parseInt(req.params.id)
+
+    if (isNaN(channelId)) return res.status(400).json({ message: 'ID inválido' })
+
+    const channel = await prisma.channel.findUnique({
+      where: { id: channelId },
+      include: { members: true }
+    })
+    if (!channel) return res.status(404).json({ message: 'Canal não encontrado' })
+
+    const isMember = channel.members.some(m => m.userId === userId)
+
+    if (channel.type === 'DM') {
+      if (!isMember) return res.status(403).json({ message: 'Sem permissão' })
+    } else {
+      if (role !== 'ADMIN' && role !== 'MANAGER') {
+        return res.status(403).json({ message: 'Sem permissão' })
+      }
+    }
+
+    await prisma.channel.delete({ where: { id: channelId } })
+    // ChannelMembers cascade delete; Messages get channelId = null (SetNull)
+    return res.status(204).send()
+  } catch (err) {
     next(err)
   }
 }

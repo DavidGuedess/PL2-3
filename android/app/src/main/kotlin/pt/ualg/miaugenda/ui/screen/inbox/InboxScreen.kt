@@ -42,6 +42,13 @@ import pt.ualg.miaugenda.data.model.User
 import pt.ualg.miaugenda.data.remote.RetrofitClient
 import pt.ualg.miaugenda.ui.components.AppBottomNav
 import pt.ualg.miaugenda.ui.components.NavTab
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.ui.window.Dialog
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -295,12 +302,19 @@ private fun BrowseChannelsScreen(
     var channels by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var users by remember { mutableStateOf<List<User>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
-    var showCreateDialog by remember { mutableStateOf(false) }
+    var createStep by remember { mutableStateOf<String?>(null) } // null | "type" | "group" | "announcement"
     var newChannelName by remember { mutableStateOf("") }
     var newChannelDesc by remember { mutableStateOf("") }
+    var selectedMemberIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var addAllMembers by remember { mutableStateOf(false) }
     var isCreating by remember { mutableStateOf(false) }
     var createError by remember { mutableStateOf<String?>(null) }
     var openingDm by remember { mutableStateOf(false) }
+
+    fun resetCreate() {
+        createStep = null; newChannelName = ""; newChannelDesc = ""
+        selectedMemberIds = emptySet(); addAllMembers = false; createError = null
+    }
     val scope = rememberCoroutineScope()
     val canCreate = currentUserRole == "ADMIN" || currentUserRole == "MANAGER"
 
@@ -323,60 +337,177 @@ private fun BrowseChannelsScreen(
         if (query.isBlank()) users else users.filter { it.name.contains(query, ignoreCase = true) }
     }
 
-    if (showCreateDialog) {
+    // ── Passo 1: escolher tipo ──────────────────────────────────────────────────
+    if (createStep == "type") {
         AlertDialog(
-            onDismissRequest = { showCreateDialog = false; createError = null; newChannelName = ""; newChannelDesc = "" },
+            onDismissRequest = { createStep = null },
             containerColor = DkSurface,
             title = { Text("Novo Canal", color = Color.White, fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = newChannelName, onValueChange = { newChannelName = it },
-                        label = { Text("Nome do canal", color = TxtGray) }, singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Blue, unfocusedBorderColor = DkSurface2,
-                            focusedTextColor = Color.White, unfocusedTextColor = Color.White
-                        ), modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = newChannelDesc, onValueChange = { newChannelDesc = it },
-                        label = { Text("Descrição (opcional)", color = TxtGray) }, singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Blue, unfocusedBorderColor = DkSurface2,
-                            focusedTextColor = Color.White, unfocusedTextColor = Color.White
-                        ), modifier = Modifier.fillMaxWidth()
-                    )
-                    createError?.let { Text(it, color = Color(0xFFFF453A), fontSize = 13.sp) }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (newChannelName.isBlank()) return@TextButton
-                        isCreating = true; createError = null
-                        scope.launch {
-                            try {
-                                val resp = RetrofitClient.messagingApi.createChannel(
-                                    CreateChannelRequest(name = newChannelName.trim(), description = newChannelDesc.trim().ifBlank { null })
-                                )
-                                if (resp.isSuccessful) {
-                                    resp.body()?.let { onSelectChannel(it, it.name) }
-                                    showCreateDialog = false; newChannelName = ""; newChannelDesc = ""
-                                } else if (resp.code() == 409) createError = "Já existe um canal com esse nome"
-                                else createError = "Erro ao criar canal (${resp.code()})"
-                            } catch (_: Exception) { createError = "Sem ligação ao servidor" }
-                            isCreating = false
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .background(DkSurface2).clickable { createStep = "group" }.padding(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.Group, null, tint = Blue, modifier = Modifier.size(26.dp))
+                        Column {
+                            Text("Grupo", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Chat com membros específicos", color = TxtGray, fontSize = 12.sp)
                         }
-                    },
-                    enabled = newChannelName.isNotBlank() && !isCreating
-                ) { Text(if (isCreating) "A criar..." else "Criar", color = Blue) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateDialog = false; createError = null; newChannelName = ""; newChannelDesc = "" }) {
-                    Text("Cancelar", color = TxtGray)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .background(DkSurface2).clickable { createStep = "announcement" }.padding(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.Announcement, null, tint = Color(0xFFFF8F00), modifier = Modifier.size(26.dp))
+                        Column {
+                            Text("Canal de Anúncios", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Difundir mensagens à equipa", color = TxtGray, fontSize = 12.sp)
+                        }
+                    }
                 }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { createStep = null }) { Text("Cancelar", color = TxtGray) }
             }
         )
+    }
+
+    // ── Passo 2: formulário de criação ──────────────────────────────────────────
+    if (createStep == "group" || createStep == "announcement") {
+        val isAnnouncement = createStep == "announcement"
+        Dialog(onDismissRequest = { resetCreate() }) {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(DkSurface)
+                    .padding(horizontal = 20.dp, vertical = 20.dp)
+            ) {
+                Text(
+                    if (isAnnouncement) "Canal de Anúncios" else "Novo Grupo",
+                    color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(14.dp))
+                OutlinedTextField(
+                    value = newChannelName, onValueChange = { newChannelName = it },
+                    label = { Text(if (isAnnouncement) "Nome do canal" else "Nome do grupo", color = TxtGray) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Blue, unfocusedBorderColor = DkSurface2,
+                        focusedTextColor = Color.White, unfocusedTextColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = newChannelDesc, onValueChange = { newChannelDesc = it },
+                    label = { Text("Detalhes (opcional)", color = TxtGray) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Blue, unfocusedBorderColor = DkSurface2,
+                        focusedTextColor = Color.White, unfocusedTextColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(12.dp))
+                if (isAnnouncement) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Adicionar todos os membros", color = Color.White, fontSize = 14.sp)
+                        Switch(
+                            checked = addAllMembers, onCheckedChange = { addAllMembers = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Blue, checkedTrackColor = Blue.copy(alpha = 0.4f))
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                if (!addAllMembers || !isAnnouncement) {
+                    Text(
+                        if (isAnnouncement) "Ou selecionar membros" else "Adicionar membros",
+                        color = TxtGray, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Column(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        users.forEach { user ->
+                            val checked = user.id in selectedMemberIds
+                            Row(
+                                modifier = Modifier.fillMaxWidth()
+                                    .clickable {
+                                        selectedMemberIds = if (checked)
+                                            selectedMemberIds - user.id else selectedMemberIds + user.id
+                                    }
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = {
+                                        selectedMemberIds = if (it)
+                                            selectedMemberIds + user.id else selectedMemberIds - user.id
+                                    },
+                                    colors = CheckboxDefaults.colors(checkedColor = Blue, uncheckedColor = TxtGray)
+                                )
+                                Text(user.name, color = Color.White, fontSize = 14.sp)
+                            }
+                        }
+                    }
+                }
+                createError?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text(it, color = Color(0xFFFF453A), fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = { resetCreate() }) { Text("Cancelar", color = TxtGray) }
+                    Spacer(Modifier.width(4.dp))
+                    TextButton(
+                        enabled = newChannelName.isNotBlank() && !isCreating,
+                        onClick = {
+                            isCreating = true; createError = null
+                            scope.launch {
+                                try {
+                                    val members = if (isAnnouncement && addAllMembers)
+                                        users.map { it.id }
+                                    else
+                                        selectedMemberIds.toList()
+                                    val resp = RetrofitClient.messagingApi.createChannel(
+                                        CreateChannelRequest(
+                                            name = newChannelName.trim(),
+                                            description = newChannelDesc.trim().ifBlank { null },
+                                            type = if (isAnnouncement) "ANNOUNCEMENT" else "GROUP",
+                                            memberIds = members
+                                        )
+                                    )
+                                    if (resp.isSuccessful) {
+                                        resp.body()?.let { onSelectChannel(it, it.name) }
+                                        resetCreate()
+                                    } else if (resp.code() == 409) createError = "Já existe um canal com esse nome"
+                                    else createError = "Erro ao criar canal (${resp.code()})"
+                                } catch (_: Exception) { createError = "Sem ligação ao servidor" }
+                                isCreating = false
+                            }
+                        }
+                    ) {
+                        Text(if (isCreating) "A criar..." else "Criar", color = Blue, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -420,7 +551,7 @@ private fun BrowseChannelsScreen(
                 if (canCreate) {
                     item {
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable { showCreateDialog = true }
+                            modifier = Modifier.fillMaxWidth().clickable { createStep = "type" }
                                 .padding(horizontal = 20.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -520,6 +651,7 @@ private fun ChatRoomScreen(
     var messageText by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -566,6 +698,11 @@ private fun ChatRoomScreen(
                         text = { Text("Detalhes do canal", color = Color.White, fontSize = 15.sp) },
                         onClick = { showMenu = false }
                     )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+                    DropdownMenuItem(
+                        text = { Text("Apagar conversa", color = Color(0xFFFF3B30), fontSize = 15.sp) },
+                        onClick = { showMenu = false; showDeleteDialog = true }
+                    )
                 }
             }
         }
@@ -593,6 +730,29 @@ private fun ChatRoomScreen(
                     MessageBubble(message = msg, isOwn = msg.userId == currentUserId)
                 }
             }
+        }
+
+        if (showDeleteDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteDialog = false },
+                containerColor = DkSurface,
+                title = { Text("Apagar conversa?", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp) },
+                text = { Text("O canal é apagado para todos. As mensagens ficam guardadas na base de dados.", color = TxtGray, fontSize = 14.sp) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDeleteDialog = false
+                        scope.launch {
+                            try {
+                                val r = RetrofitClient.messagingApi.deleteChannel(channelId)
+                                if (r.isSuccessful) onBack()
+                            } catch (_: Exception) {}
+                        }
+                    }) { Text("APAGAR", color = Color(0xFFFF3B30), fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteDialog = false }) { Text("CANCELAR", color = TxtGray) }
+                }
+            )
         }
 
         Box(

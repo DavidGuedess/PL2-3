@@ -5,6 +5,8 @@ data class Channel(
     val name: String,
     val description: String?,
     val isPublic: Boolean,
+    val type: String = "GROUP",
+    val createdById: Int = 0,
     val createdAt: String,
     val updatedAt: String,
     val messages: List<ChannelMessage> = emptyList()
@@ -27,7 +29,9 @@ data class MessageSender(
 data class CreateChannelRequest(
     val name: String,
     val description: String? = null,
-    val isPublic: Boolean = true
+    val isPublic: Boolean = true,
+    val type: String = "GROUP",
+    val memberIds: List<Int> = emptyList()
 )
 
 data class SendMessageRequest(

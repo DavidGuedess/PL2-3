@@ -6,6 +6,7 @@ import pt.ualg.miaugenda.data.model.CreateChannelRequest
 import pt.ualg.miaugenda.data.model.SendMessageRequest
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -33,4 +34,7 @@ interface MessagingApi {
         @Path("id") channelId: Int,
         @Body request: SendMessageRequest
     ): Response<ChannelMessage>
+
+    @DELETE("channels/{id}")
+    suspend fun deleteChannel(@Path("id") id: Int): Response<Unit>
 }
