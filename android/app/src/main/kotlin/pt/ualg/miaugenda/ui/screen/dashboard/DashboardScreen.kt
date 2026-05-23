@@ -307,10 +307,6 @@ private fun HomeScreen(
                     )
                 }
 
-                item { SectionTitle("Pedidos para Si") }
-                item { TimeOffCard(onApprove) }
-                item { Spacer(Modifier.height(22.dp)) }
-
                 item { SectionTitle("Resumo de Hoje") }
                 item { TodaySnapshot(onNavigate) }
                 item { SectionTitle("Resumo da Semana") }
