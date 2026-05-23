@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import pt.ualg.miaugenda.MiauGendaApp
-import pt.ualg.miaugenda.data.model.AttendanceRecord
 import pt.ualg.miaugenda.data.model.CreateShiftRequest
 import pt.ualg.miaugenda.data.model.CreateUserRequest
 import pt.ualg.miaugenda.data.model.CreateWeekAssignmentRequest
@@ -33,7 +32,6 @@ data class SchedulerUiState(
     val weekAssignments: List<WeekAssignment> = emptyList(),
     val timeOffRequests: List<TimeOffRequest> = emptyList(),
     val availabilities: List<Availability> = emptyList(),
-    val attendanceRecords: List<AttendanceRecord> = emptyList(),
     val statusFilter: String? = null,
     val categoryFilter: String? = null,
     val isLoading: Boolean = true,
@@ -75,23 +73,20 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
                     val stD      = async { RetrofitClient.shiftApi.getShiftTypes() }
                     val torD     = async { RetrofitClient.requestApi.getTimeOffRequests() }
                     val availD   = async { RetrofitClient.availabilityApi.getAvailabilities(startDate = weekStr, endDate = weekEndStr) }
-                    val attD     = async { RetrofitClient.attendanceApi.getMyHistory(from = weekStr, to = weekEndStr) }
 
                     val sR   = shiftsD.await()
                     val stR  = stD.await()
                     val torR = torD.await()
                     val avR  = availD.await()
-                    val attR = attD.await()
 
                     if (sR.isSuccessful && stR.isSuccessful) {
                         _uiState.value = _uiState.value.copy(
-                            shifts             = sR.body().orEmpty(),
-                            users              = emptyList(),
-                            shiftTypes         = stR.body().orEmpty(),
-                            timeOffRequests    = if (torR.isSuccessful) torR.body().orEmpty() else emptyList(),
-                            availabilities     = if (avR.isSuccessful) avR.body().orEmpty() else emptyList(),
-                            attendanceRecords  = if (attR.isSuccessful) attR.body().orEmpty() else emptyList(),
-                            isLoading          = false
+                            shifts          = sR.body().orEmpty(),
+                            users           = emptyList(),
+                            shiftTypes      = stR.body().orEmpty(),
+                            timeOffRequests = if (torR.isSuccessful) torR.body().orEmpty() else emptyList(),
+                            availabilities  = if (avR.isSuccessful) avR.body().orEmpty() else emptyList(),
+                            isLoading       = false
                         )
                     } else {
                         _uiState.value = _uiState.value.copy(
@@ -107,7 +102,6 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
                     val waD     = async { RetrofitClient.weekAssignmentApi.getWeekAssignments(week = weekStr) }
                     val torD    = async { RetrofitClient.requestApi.getTimeOffRequests() }
                     val availD  = async { RetrofitClient.availabilityApi.getAvailabilities(startDate = weekStr, endDate = weekEndStr) }
-                    val attD    = async { RetrofitClient.attendanceApi.getAttendance(from = weekStr, to = weekEndStr) }
 
                     val sR   = shiftsD.await()
                     val uR   = usersD.await()
@@ -115,18 +109,16 @@ class SchedulerViewModel(application: Application) : AndroidViewModel(applicatio
                     val waR  = waD.await()
                     val torR = torD.await()
                     val avR  = availD.await()
-                    val attR = attD.await()
 
                     if (sR.isSuccessful && uR.isSuccessful && stR.isSuccessful) {
                         _uiState.value = _uiState.value.copy(
-                            shifts             = sR.body().orEmpty(),
-                            users              = uR.body().orEmpty(),
-                            shiftTypes         = stR.body().orEmpty(),
-                            weekAssignments    = waR.body().orEmpty(),
-                            timeOffRequests    = if (torR.isSuccessful) torR.body().orEmpty() else emptyList(),
-                            availabilities     = if (avR.isSuccessful) avR.body().orEmpty() else emptyList(),
-                            attendanceRecords  = if (attR.isSuccessful) attR.body().orEmpty() else emptyList(),
-                            isLoading          = false
+                            shifts          = sR.body().orEmpty(),
+                            users           = uR.body().orEmpty(),
+                            shiftTypes      = stR.body().orEmpty(),
+                            weekAssignments = waR.body().orEmpty(),
+                            timeOffRequests = if (torR.isSuccessful) torR.body().orEmpty() else emptyList(),
+                            availabilities  = if (avR.isSuccessful) avR.body().orEmpty() else emptyList(),
+                            isLoading       = false
                         )
                     } else {
                         _uiState.value = _uiState.value.copy(

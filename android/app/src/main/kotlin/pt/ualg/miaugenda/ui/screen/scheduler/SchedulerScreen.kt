@@ -40,7 +40,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
-import pt.ualg.miaugenda.data.model.AttendanceRecord
 import pt.ualg.miaugenda.data.model.CreateUserRequest
 import pt.ualg.miaugenda.ui.components.AppBottomNav
 import pt.ualg.miaugenda.ui.components.NavTab
@@ -49,8 +48,6 @@ import pt.ualg.miaugenda.data.model.Shift
 import pt.ualg.miaugenda.data.model.ShiftType
 import pt.ualg.miaugenda.data.model.User
 import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -265,45 +262,10 @@ private fun calcDuration(start: String, end: String, breakMin: Int = 0): String 
     return if (m == 0) "${h}h 0m" else "${h}h ${m}m"
 }
 
-// ── Estado de presença do turno ───────────────────────────────────────────────
-private enum class ShiftStatus { DRAFT, PUBLISHED, ON_SHIFT, LATE, FINISHED, ABSENT }
-
-private fun computeShiftStatus(
-    shift: Shift,
-    attendanceRecords: List<AttendanceRecord>,
-    now: LocalDateTime = LocalDateTime.now()
-): ShiftStatus {
-    if (!shift.published) return ShiftStatus.DRAFT
-    return try {
-        val dateStr = shift.date.substring(0, 10)
-        val clockIn  = attendanceRecords.find { it.userId == shift.userId && it.type == "IN"  && it.timestamp.startsWith(dateStr) }
-        val clockOut = attendanceRecords.find { it.userId == shift.userId && it.type == "OUT" && it.timestamp.startsWith(dateStr) }
-        val shiftStartDt = LocalDateTime.of(LocalDate.parse(dateStr), LocalTime.parse(shift.resolvedStartTime()))
-        val lateCutoff = shiftStartDt.plusMinutes(15)
-        val zoneId = java.time.ZoneId.systemDefault()
-        fun parseTs(ts: String): LocalDateTime = runCatching {
-            java.time.Instant.parse(ts).atZone(zoneId).toLocalDateTime()
-        }.getOrElse { LocalDateTime.parse(ts.substring(0, 19)) }
-        when {
-            clockIn != null -> {
-                val isLate = parseTs(clockIn.timestamp).isAfter(lateCutoff)
-                if (clockOut != null) if (isLate) ShiftStatus.LATE else ShiftStatus.FINISHED
-                else if (isLate) ShiftStatus.LATE else ShiftStatus.ON_SHIFT
-            }
-            now.isAfter(lateCutoff) -> ShiftStatus.ABSENT
-            else -> ShiftStatus.PUBLISHED
-        }
-    } catch (_: Exception) { ShiftStatus.PUBLISHED }
-}
-
 private val STATUS_FILTERS = listOf(
-    Triple("Todos",      Icons.Outlined.List,                Color.White),
-    Triple("Publicado",  Icons.Outlined.CheckCircle,         Blue),
-    Triple("Rascunho",   Icons.Outlined.Lock,                TxtGray),
-    Triple("Concluido",  Icons.Outlined.CheckCircleOutline,  TxtGray),
-    Triple("Ausente",    Icons.Outlined.Block,               RedBadge),
-    Triple("Atrasado",   Icons.Outlined.Schedule,            Orange),
-    Triple("Em Turno",   Icons.Outlined.PlayArrow,           DkGreen),
+    Triple("Todos",     Icons.Outlined.List,         Color.White),
+    Triple("Publicado", Icons.Outlined.CheckCircle,  Blue),
+    Triple("Rascunho",  Icons.Outlined.Lock,         TxtGray),
 )
 
 // ── Root ──────────────────────────────────────────────────────────────────────
@@ -572,26 +534,16 @@ private fun SchedulerGrid(
     val availableUsers = uiState.users.filter { it.id !in displayedUserIds }
 
     // Filtrar utilizadores por categoria
-    val now = remember { LocalDateTime.now() }
     val displayedUsers = if (uiState.categoryFilter != null)
         allDisplayedUsers.filter { it.category == uiState.categoryFilter }
     else allDisplayedUsers
 
     // Filtrar turnos por estado
     fun shiftsForUser(userId: Int) = uiState.shifts.filter { it.userId == userId }.let { userShifts ->
-        val statusFilter = uiState.statusFilter
-        if (statusFilter == null || statusFilter == "Todos") userShifts
-        else userShifts.filter { shift ->
-            val s = computeShiftStatus(shift, uiState.attendanceRecords, now)
-            when (statusFilter) {
-                "Publicado" -> s == ShiftStatus.PUBLISHED
-                "Rascunho"  -> s == ShiftStatus.DRAFT
-                "Concluido" -> s == ShiftStatus.FINISHED
-                "Ausente"   -> s == ShiftStatus.ABSENT
-                "Atrasado"  -> s == ShiftStatus.LATE
-                "Em Turno"  -> s == ShiftStatus.ON_SHIFT
-                else        -> true
-            }
+        when (uiState.statusFilter) {
+            "Publicado" -> userShifts.filter { it.published }
+            "Rascunho"  -> userShifts.filter { !it.published }
+            else        -> userShifts
         }
     }
 
@@ -756,11 +708,9 @@ private fun SchedulerGrid(
                                                         verticalArrangement = Arrangement.spacedBy(2.dp)
                                                     ) {
                                                         dayShifts.forEach { shift ->
-                                                            val shiftStatus = computeShiftStatus(shift, uiState.attendanceRecords, now)
                                                             Box(modifier = Modifier.weight(1f)) {
                                                                 ShiftCell(
                                                                     shift = shift,
-                                                                    status = shiftStatus,
                                                                     isSelected = shift.id in selectedShiftIds,
                                                                     isSelectMode = isSelectMode,
                                                                     onLongClick = { selectedShiftIds = selectedShiftIds + shift.id },
@@ -1263,7 +1213,6 @@ private fun VacationCell() {
 @Composable
 private fun ShiftCell(
     shift: Shift,
-    status: ShiftStatus = ShiftStatus.PUBLISHED,
     isSelected: Boolean = false,
     isSelectMode: Boolean = false,
     onLongClick: () -> Unit = {},
@@ -1271,13 +1220,6 @@ private fun ShiftCell(
 ) {
     val cellColor = shiftCellColor(shift.published, shift.userId)
     val textAlpha = if (shift.published) 1f else 0.55f
-    val statusDotColor = when (status) {
-        ShiftStatus.ON_SHIFT  -> DkGreen
-        ShiftStatus.LATE      -> Orange
-        ShiftStatus.FINISHED  -> TxtGray
-        ShiftStatus.ABSENT    -> RedBadge
-        else                  -> Color.Transparent
-    }
     Box(
         modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp))
             .background(if (isSelected) Blue.copy(alpha = 0.35f) else cellColor)
@@ -1303,14 +1245,6 @@ private fun ShiftCell(
                 Icons.Outlined.Lock, null,
                 tint = Color.White.copy(alpha = 0.4f),
                 modifier = Modifier.size(10.dp).align(Alignment.BottomEnd)
-            )
-        } else if (statusDotColor != Color.Transparent) {
-            Box(
-                modifier = Modifier
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(statusDotColor)
-                    .align(Alignment.BottomEnd)
             )
         }
     }
