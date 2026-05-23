@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import pt.ualg.miaugenda.data.model.ActiveEmployee
 import pt.ualg.miaugenda.data.model.AttendanceRecord
 import pt.ualg.miaugenda.data.model.CreateAttendanceBody
 import pt.ualg.miaugenda.data.model.Shift
@@ -16,10 +17,13 @@ import java.time.LocalDate
 data class DashboardUiState(
     val shifts: List<Shift> = emptyList(),
     val attendanceRecords: List<AttendanceRecord> = emptyList(),
+    val activeEmployees: List<ActiveEmployee> = emptyList(),
     val timeOffRequests: List<TimeOffRequest> = emptyList(),
     val shiftSwapRequests: List<ShiftSwapRequest> = emptyList(),
     val isLoading: Boolean = true,
     val error: Boolean = false,
+    // Total de turnos publicados da semana (todos os funcionários)
+    val allWeekShiftsCount: Int = 0,
     // Estado de assiduidade
     val isClocked: Boolean = false,
     val clockedInSince: String? = null   // timestamp ISO do último registo IN
@@ -39,15 +43,17 @@ class DashboardViewModel : ViewModel() {
             _uiState.value = _uiState.value.copy(isLoading = true, error = false)
             try {
                 val weekEnd = weekStart.plusDays(6)
-                val shiftsResp = RetrofitClient.shiftApi.getMyShifts(week = weekStart.toString())
-                val attendResp = RetrofitClient.attendanceApi.getMyHistory(
+                val shiftsResp    = RetrofitClient.shiftApi.getMyShifts(week = weekStart.toString())
+                val allShiftsResp = RetrofitClient.shiftApi.getShifts(week = weekStart.toString())
+                val attendResp    = RetrofitClient.attendanceApi.getMyHistory(
                     from = weekStart.toString(), to = weekEnd.toString()
                 )
                 if (shiftsResp.isSuccessful) {
                     _uiState.value = _uiState.value.copy(
-                        shifts            = shiftsResp.body().orEmpty(),
-                        attendanceRecords = if (attendResp.isSuccessful) attendResp.body().orEmpty() else emptyList(),
-                        isLoading         = false
+                        shifts              = shiftsResp.body().orEmpty(),
+                        attendanceRecords   = if (attendResp.isSuccessful) attendResp.body().orEmpty() else emptyList(),
+                        allWeekShiftsCount  = if (allShiftsResp.isSuccessful) allShiftsResp.body().orEmpty().count { it.published } else 0,
+                        isLoading           = false
                     )
                 } else {
                     _uiState.value = _uiState.value.copy(isLoading = false, error = true)
@@ -58,7 +64,7 @@ class DashboardViewModel : ViewModel() {
         }
     }
 
-    // Carrega o estado de ponto do dia de hoje
+    // Carrega o estado de ponto do dia de hoje + lista de ativos
     fun loadTodayAttendance() {
         viewModelScope.launch {
             try {
@@ -71,6 +77,12 @@ class DashboardViewModel : ViewModel() {
                     _uiState.value = _uiState.value.copy(
                         isClocked      = clocked,
                         clockedInSince = if (clocked) last?.timestamp else null
+                    )
+                }
+                val activeResp = RetrofitClient.attendanceApi.getActiveEmployees()
+                if (activeResp.isSuccessful) {
+                    _uiState.value = _uiState.value.copy(
+                        activeEmployees = activeResp.body().orEmpty()
                     )
                 }
             } catch (_: Exception) { }

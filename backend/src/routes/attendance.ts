@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticate, requireRole } from '../middleware/auth'
-import { createAttendance, getMyAttendance, getAttendanceReport, getAttendanceStats, updateAttendanceRecord, deleteAttendanceRecord } from '../controllers/attendanceController'
+import { createAttendance, getMyAttendance, getAttendanceReport, getAttendanceStats, updateAttendanceRecord, deleteAttendanceRecord, getActiveAttendance } from '../controllers/attendanceController'
 import { validate } from '../middleware/validate'
 import { createAttendanceSchema, updateAttendanceSchema } from '../schemas'
 
@@ -73,6 +73,9 @@ router.use(authenticate)
  *         description: Não autenticado
  */
 router.post('/', validate(createAttendanceSchema), createAttendance)
+
+router.get('/active', getActiveAttendance)
+
 
 /**
  * @openapi

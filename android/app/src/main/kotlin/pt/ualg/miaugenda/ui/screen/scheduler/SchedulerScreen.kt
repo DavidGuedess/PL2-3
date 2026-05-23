@@ -352,6 +352,7 @@ fun SchedulerScreen(
                         ShiftDetailScreen(
                             shift     = s.shift,
                             uiState   = uiState,
+                            userRole  = userRole,
                             onBack    = { screen = SchedScreen.Grid },
                             onEdit    = { screen = SchedScreen.EditarTurno(s.shift) },
                             onDelete  = { shiftId ->
@@ -675,6 +676,7 @@ private fun SchedulerGrid(
                             days.forEach { day ->
                                 Box(modifier = Modifier.width(1.dp).fillMaxHeight().background(lineClr))
                                 val dayShifts = userShifts.filter { it.date.startsWith(dateStr(day)) }
+                                    .sortedBy { it.resolvedStartTime() }
                                 val dayAvail = uiState.availabilities.find {
                                     it.userId == user.id && it.date.startsWith(dateStr(day))
                                 }
@@ -686,19 +688,9 @@ private fun SchedulerGrid(
                                         !day.isBefore(s) && !day.isAfter(e)
                                     }.getOrDefault(false)
                                 }
-                                val availOutlineColor = when {
-                                    dayAvail?.type == "UNAVAILABLE" -> Color(0xFFE53935)
-                                    dayAvail != null -> DkGreen
-                                    else -> Color.Transparent
-                                }
                                 Box(
                                     modifier = Modifier
                                         .weight(1f).fillMaxHeight().padding(2.dp)
-                                        .then(
-                                            if (dayAvail != null)
-                                                Modifier.border(1.5.dp, availOutlineColor, RoundedCornerShape(6.dp))
-                                            else Modifier
-                                        )
                                 ) {
                                     if (hasVacation) {
                                         VacationCell()
@@ -761,6 +753,17 @@ private fun SchedulerGrid(
                                                 }
                                             }
                                         }
+                                    }
+                                    // Bolinha de disponibilidade — canto inferior direito
+                                    if (dayAvail != null) {
+                                        val dotColor = if (dayAvail.type == "UNAVAILABLE") Color(0xFFE53935) else DkGreen
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(2.dp)
+                                                .size(6.dp)
+                                                .background(dotColor, CircleShape)
+                                        )
                                     }
                                 }
                             }
@@ -1064,18 +1067,8 @@ private fun SchedulerGrid(
                         .background(DkSurface).clickable {}
                         .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
                 ) {
-                    Text("Opcoes", color = Color.White, fontSize = 16.sp,
+                    Text("Opções", color = Color.White, fontSize = 16.sp,
                         fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
-                            .clickable { /* Export - nao implementado */ showOptionsMenu = false },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Icon(Icons.Outlined.FileDownload, null, tint = TxtGray, modifier = Modifier.size(24.dp))
-                        Text("Export Schedule", color = TxtGray, fontSize = 16.sp)
-                    }
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
                             .clickable {
@@ -1087,7 +1080,7 @@ private fun SchedulerGrid(
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Icon(Icons.Outlined.ContentCopy, null, tint = Color.White, modifier = Modifier.size(24.dp))
-                        Text("Copy Shifts", color = Color.White, fontSize = 16.sp)
+                        Text("Copiar Turnos", color = Color.White, fontSize = 16.sp)
                     }
                 }
             }
@@ -1354,12 +1347,14 @@ private fun DayDetailScreen(
 private fun ShiftDetailScreen(
     shift: Shift,
     uiState: SchedulerUiState,
+    userRole: String = "ADMIN",
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onDelete: (Int) -> Unit,
     onPublish: (String) -> Unit,
     onPublishShift: (Int, (Boolean, String) -> Unit) -> Unit
 ) {
+    val isReadOnly = userRole == "EMPLOYEE"
     var showNotifySheet by remember { mutableStateOf(false) }
     var showDotsMenu    by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -1377,12 +1372,14 @@ private fun ShiftDetailScreen(
                 Box(modifier = Modifier.clip(CircleShape).clickable { onBack() }.padding(4.dp)) {
                     Icon(Icons.Filled.ArrowBack, null, tint = Color.White, modifier = Modifier.size(22.dp))
                 }
-                Box(
-                    modifier = Modifier.size(34.dp).clip(CircleShape).background(DkSurface2)
-                        .clickable { showDotsMenu = true },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Outlined.MoreHoriz, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                if (!isReadOnly) {
+                    Box(
+                        modifier = Modifier.size(34.dp).clip(CircleShape).background(DkSurface2)
+                            .clickable { showDotsMenu = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Outlined.MoreHoriz, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
                 }
             }
             LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 20.dp)) {
@@ -1481,27 +1478,29 @@ private fun ShiftDetailScreen(
                 }
                 item {
                     Spacer(Modifier.height(20.dp))
-                    if (!shift.published) {
-                        Button(
-                            onClick = { showNotifySheet = true },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Blue)
-                        ) {
-                            Text("Publicar turno", color = Color.White, fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
-                        }
-                    } else {
-                        Box(
-                            modifier = Modifier.fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(DkSurface2)
-                                .padding(vertical = 14.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Outlined.CheckCircle, null, tint = DkGreen, modifier = Modifier.size(18.dp))
-                                Text("Turno publicado", color = DkGreen, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    if (!isReadOnly) {
+                        if (!shift.published) {
+                            Button(
+                                onClick = { showNotifySheet = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Blue)
+                            ) {
+                                Text("Publicar turno", color = Color.White, fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(DkSurface2)
+                                    .padding(vertical = 14.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Outlined.CheckCircle, null, tint = DkGreen, modifier = Modifier.size(18.dp))
+                                    Text("Turno publicado", color = DkGreen, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         }
                     }

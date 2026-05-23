@@ -6,8 +6,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
 import pt.ualg.miaugenda.AppState
 import pt.ualg.miaugenda.MiauGendaApp
 import pt.ualg.miaugenda.ui.screen.dashboard.DashboardScreen
@@ -104,8 +106,13 @@ fun NavGraph(
             )
         }
 
-        composable(Screen.Inbox.route) {
+        composable(
+            route = "inbox?dm={dm}",
+            arguments = listOf(navArgument("dm") { type = NavType.IntType; defaultValue = -1 })
+        ) { backStackEntry ->
+            val dmUserId = backStackEntry.arguments?.getInt("dm").takeIf { it != null && it > 0 }
             InboxScreen(
+                dmWithUserId = dmUserId,
                 onSchedulerClick = {
                     navController.navigate(Screen.Scheduler.route) {
                         popUpTo(Screen.Scheduler.route) { inclusive = true }
@@ -233,7 +240,8 @@ fun NavGraph(
                 onNavigateToHome          = { navController.navigate(Screen.Dashboard.route) { launchSingleTop = true } },
                 onNavigateToScheduler     = { navController.navigate(Screen.Scheduler.route) { launchSingleTop = true } },
                 onNavigateToInbox         = { navController.navigate(Screen.Inbox.route) { launchSingleTop = true } },
-                onNavigateToNotifications = { navController.navigate(Screen.Notifications.route) { launchSingleTop = true } }
+                onNavigateToNotifications = { navController.navigate(Screen.Notifications.route) { launchSingleTop = true } },
+                onMessageClick            = { userId -> navController.navigate("inbox?dm=$userId") { launchSingleTop = true } }
             )
         }
     }

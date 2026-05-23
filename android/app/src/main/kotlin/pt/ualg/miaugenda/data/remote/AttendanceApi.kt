@@ -1,5 +1,6 @@
 package pt.ualg.miaugenda.data.remote
 
+import pt.ualg.miaugenda.data.model.ActiveEmployee
 import pt.ualg.miaugenda.data.model.AttendanceRecord
 import pt.ualg.miaugenda.data.model.CreateAttendanceBody
 import retrofit2.Response
@@ -26,4 +27,7 @@ interface AttendanceApi {
         @Query("from") from: String? = null,
         @Query("to") to: String? = null
     ): Response<List<AttendanceRecord>>
+
+    @GET("/attendance/active")
+    suspend fun getActiveEmployees(): Response<List<ActiveEmployee>>
 }
