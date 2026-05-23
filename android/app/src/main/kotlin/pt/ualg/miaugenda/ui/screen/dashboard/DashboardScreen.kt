@@ -164,7 +164,11 @@ fun DashboardScreen(
                 onEquipaClick         = onEquipaClick,
                 onAvailabilityClick   = onAvailabilityClick
             )
-            SubScreen.TurnosAgendados    -> ScreenTurnosAgendados(onBack = { subScreen = SubScreen.Home })
+            SubScreen.TurnosAgendados    -> ScreenTurnosAgendados(
+                shifts   = uiState.shifts.filter { it.published },
+                userName = fullName,
+                onBack   = { subScreen = SubScreen.Home }
+            )
             SubScreen.EmPausa            -> ScreenEmPausa(onBack = { subScreen = SubScreen.Home })
             SubScreen.EmTurno            -> ScreenEmTurno(onBack = { subScreen = SubScreen.Home })
             SubScreen.FolhasPonto        -> ScreenFolhasPonto(onBack = { subScreen = SubScreen.Home }, onSchedulerClick = onSchedulerClick, onNotificationsClick = onNotificationsClick, onInboxClick = onInboxClick)
@@ -277,6 +281,7 @@ private fun HomeScreen(
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
+                item { Spacer(Modifier.height(10.dp)) }
                 item { DashHeader(firstName, onProfileClick) }
 
                 item {
@@ -1234,61 +1239,93 @@ private fun ShiftCardItem(
             .clip(RoundedCornerShape(12.dp))
             .background(DkSurface)
     ) {
-        Column(modifier = Modifier.padding(start = 17.dp, top = 12.dp, end = 14.dp, bottom = 12.dp)) {
-            Text(dept, color = deptColor, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    DkAvatar(initials = initials, color = avatarColor, size = 30)
-                    Column {
-                        Text(name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        Text(time, color = TxtGray, fontSize = 13.sp)
+        Row {
+            // Borda esquerda colorida
+            Box(modifier = Modifier.width(3.5.dp).fillMaxHeight().background(deptColor))
+            Column(modifier = Modifier.weight(1f).padding(start = 14.dp, top = 12.dp, end = 14.dp, bottom = 12.dp)) {
+                Text(dept, color = deptColor, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        DkAvatar(initials = initials, color = avatarColor, size = 30)
+                        Column {
+                            Text(name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text(time, color = TxtGray, fontSize = 13.sp)
+                        }
                     }
+                    DkStatusBadge(status, statusColor, statusBg)
                 }
-                DkStatusBadge(status, statusColor, statusBg)
             }
         }
-        // Borda esquerda colorida
-        Box(modifier = Modifier.width(3.5.dp).matchParentSize().background(deptColor))
     }
 }
 
 // ── Sub-ecrãs ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ScreenTurnosAgendados(onBack: () -> Unit) {
+private fun ScreenTurnosAgendados(shifts: List<Shift>, userName: String, onBack: () -> Unit) {
+    val today = LocalDate.now()
+    val dayNames = listOf("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
+    val grouped = shifts
+        .sortedBy { it.date }
+        .groupBy { it.date.substring(0, 10) }
+    val initials = userName.split(" ").take(2).mapNotNull { it.firstOrNull()?.uppercaseChar() }.joinToString("")
+    val avatarColor = Color(0xFF2979FF)
+    val totalHours = shifts.sumOf { shift ->
+        runCatching {
+            val start = java.time.LocalTime.parse(shift.resolvedStartTime())
+            val end   = java.time.LocalTime.parse(shift.resolvedEndTime())
+            val mins  = if (end.isAfter(start)) java.time.Duration.between(start, end).toMinutes()
+                        else java.time.Duration.between(start, end).toMinutes() + 24 * 60
+            mins / 60.0
+        }.getOrDefault(0.0)
+    }
+
     Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
         SubHeader("Total de Turnos Agendados", onBack)
-        StatRow(listOf("Turnos" to "8", "Funcionários" to "4", "Horas totais" to "62.0"))
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
-        ) {
-            item {
-                DayGroup("13", "Qua") {
-                    ShiftCardItem("Segurança", DkPurple, "MD", Color(0xFFC87941), "Maria Doe", "9:00a - 5:00p • 0/3", "Concluído", TxtGray, TxtGray.copy(alpha = 0.15f))
-                }
+        StatRow(listOf(
+            "Turnos" to "${shifts.size}",
+            "Esta semana" to "${shifts.count { it.date.substring(0,10) >= today.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY)).toString() }}",
+            "Horas totais" to "${"%.1f".format(totalHours)}h"
+        ))
+        if (shifts.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Sem turnos agendados.", color = TxtGray, fontSize = 15.sp)
             }
-            item {
-                DayGroup("14", "Qui", Blue) {
-                    ShiftCardItem("Vendas", Orange, "XB", Color(0xFF5B5FEF), "Xavier Bolotinha", "6:00p - 3:00a • 0/3", "Em Pausa", Orange, Orange.copy(alpha = 0.18f))
-                    ShiftCardItem("Segurança", DkPurple, "MD", Color(0xFFC87941), "Maria Doe", "9:00p - 6:00a • 0/3", "Em Turno", DkGreen, DkGreen.copy(alpha = 0.15f))
-                }
-            }
-            item {
-                DayGroup("15", "Sex") {
-                    ShiftCardItem("Vendas", Orange, "MDoe", Color(0xFF5B5FEF), "Michael Doe", "0:00a - 4:00a • 0/3", "A Iniciar", Blue, Blue.copy(alpha = 0.15f))
-                    ShiftCardItem("Admin", DkPurple, "MDoe", Color(0xFF5B5FEF), "Michael Doe", "9:00a - 5:00p • 0/3", "Confirmado", Blue, Blue.copy(alpha = 0.15f))
-                    ShiftCardItem("Vendas", Orange, "JD", Color(0xFF00ACC1), "Jane Doe", "9:00a - 5:00p • 0/3", "Confirmado", Blue, Blue.copy(alpha = 0.15f))
-                    ShiftCardItem("Segurança", DkPurple, "MD", Color(0xFFC87941), "Maria Doe", "9:00a - 5:00p • 0/3", "Pendente", Orange, Orange.copy(alpha = 0.15f))
-                }
-            }
-            item {
-                DayGroup("16", "Sáb") {
-                    OpenShiftCard()
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)) {
+                grouped.forEach { (dateStr, dayShifts) ->
+                    item {
+                        val date = runCatching { LocalDate.parse(dateStr) }.getOrNull()
+                        val dayNum  = date?.dayOfMonth?.toString() ?: dateStr.takeLast(2)
+                        val dayName = date?.let { dayNames[(it.dayOfWeek.value - 1) % 7] } ?: ""
+                        val isToday = date == today
+                        DayGroup(dayNum, dayName, if (isToday) Blue else Color.White) {
+                            dayShifts.forEach { shift ->
+                                val shiftName = shift.shiftType?.name ?: "Turno"
+                                val timeStr   = "${shift.resolvedStartTime()} – ${shift.resolvedEndTime()}"
+                                val (statusLabel, statusColor) = when {
+                                    date != null && date.isBefore(today) -> "Concluído" to TxtGray
+                                    isToday -> "Hoje" to DkGreen
+                                    else    -> "Agendado" to Blue
+                                }
+                                ShiftCardItem(
+                                    dept        = shiftName,
+                                    deptColor   = Blue,
+                                    initials    = initials,
+                                    avatarColor = avatarColor,
+                                    name        = userName,
+                                    time        = timeStr,
+                                    status      = statusLabel,
+                                    statusColor = statusColor,
+                                    statusBg    = statusColor.copy(alpha = 0.15f)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1305,24 +1342,26 @@ private fun OpenShiftCard(surfaceColor: Color = DkSurface) {
             .clip(RoundedCornerShape(12.dp))
             .background(surfaceColor)
     ) {
-        Column(modifier = Modifier.padding(start = 17.dp, top = 12.dp, end = 14.dp, bottom = 12.dp)) {
-            Text("Sem Posição", color = Blue, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(Icons.Outlined.HelpOutline, contentDescription = null, tint = Blue, modifier = Modifier.size(18.dp))
-                        Text("Turno Aberto", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Row {
+            Box(modifier = Modifier.width(3.5.dp).fillMaxHeight().background(Blue))
+            Column(modifier = Modifier.weight(1f).padding(start = 14.dp, top = 12.dp, end = 14.dp, bottom = 12.dp)) {
+                Text("Sem Posição", color = Blue, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Outlined.HelpOutline, contentDescription = null, tint = Blue, modifier = Modifier.size(18.dp))
+                            Text("Turno Aberto", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Text("9:00a - 5:00p • 0/3", color = TxtGray, fontSize = 13.sp)
                     }
-                    Text("9:00a - 5:00p • 0/3", color = TxtGray, fontSize = 13.sp)
+                    DkStatusBadge("Vaga", Blue, Blue.copy(alpha = 0.15f))
                 }
-                DkStatusBadge("Vaga", Blue, Blue.copy(alpha = 0.15f))
             }
         }
-        Box(modifier = Modifier.width(3.5.dp).matchParentSize().background(Blue))
     }
 }
 

@@ -170,7 +170,6 @@ fun NotificationsScreen(
 
     LaunchedEffect(Unit) { loadNotifications() }
 
-    val pendingCount = notifications.count { it.status == NotifStatus.PENDENTE }
     val detailItem   = detailItemId?.let { id -> notifications.find { it.id == id } }
 
     BackHandler(enabled = detailItem != null) { detailItemId = null }
@@ -189,11 +188,8 @@ fun NotificationsScreen(
                     else      -> null
                 }
                 if (r?.isSuccessful == true) {
-                    notifications = notifications.map {
-                        if (it.id == item.id && it.requestCategory == item.requestCategory)
-                            it.copy(status = NotifStatus.APROVADO, approvedByName = currentUserName)
-                        else it
-                    }
+                    detailItemId = null
+                    loadNotifications()
                 }
             } catch (_: Exception) { }
         }
@@ -208,11 +204,8 @@ fun NotificationsScreen(
                     else      -> null
                 }
                 if (r?.isSuccessful == true) {
-                    notifications = notifications.map {
-                        if (it.id == item.id && it.requestCategory == item.requestCategory)
-                            it.copy(status = NotifStatus.REJEITADO, approvedByName = currentUserName)
-                        else it
-                    }
+                    detailItemId = null
+                    loadNotifications()
                 }
             } catch (_: Exception) { }
         }
@@ -223,8 +216,7 @@ fun NotificationsScreen(
             try {
                 val r = RetrofitClient.requestApi.respondToSwapRequest(item.id, mapOf("accept" to accept))
                 if (r.isSuccessful) {
-                    // Remove item da lista — já não precisa de resposta
-                    notifications = notifications.filter { it.id != item.id || it.requestCategory != "swap" }
+                    loadNotifications()
                 }
             } catch (_: Exception) { }
         }
@@ -246,9 +238,7 @@ fun NotificationsScreen(
                 } else {
                     NotificationsList(
                         notifications = notifications,
-                        pendingCount  = pendingCount,
                         isManager     = isManager,
-                        onReadAll     = { notifications = notifications.map { it.copy(isRead = true) } },
                         onViewDetails = { detailItemId   = it.id },
                         onApprove     = { approveTargetId = it.id },
                         onReject      = { rejectTargetId  = it.id },
@@ -344,9 +334,7 @@ fun NotificationsScreen(
 @Composable
 private fun NotificationsList(
     notifications: List<NotifItem>,
-    pendingCount: Int,
     isManager: Boolean,
-    onReadAll: () -> Unit,
     onViewDetails: (NotifItem) -> Unit,
     onApprove: (NotifItem) -> Unit,
     onReject: (NotifItem) -> Unit,
@@ -358,18 +346,13 @@ private fun NotificationsList(
         contentPadding = PaddingValues(bottom = 16.dp)
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Notificações", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-                if (pendingCount > 0) {
-                    TextButton(onClick = onReadAll) {
-                        Text("Ler tudo ($pendingCount)", color = Blue, fontSize = 14.sp)
-                    }
-                }
-            }
+            Text(
+                "Notificações",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+            )
         }
         item {
             Text(
