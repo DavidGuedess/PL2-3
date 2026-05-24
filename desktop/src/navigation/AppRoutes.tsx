@@ -1,29 +1,28 @@
-import { ReactNode, useEffect } from "react";
+import { useEffect } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 
 import { tokenManager } from "../storage/tokenManager";
 import { listenTokenExpired } from "../state/authEvents";
 import { routes } from "./routes";
 
+import { AppLayout } from "../components/AppLayout";
 import { LoginScreen } from "../screens/login/LoginScreen";
 import { DashboardScreen } from "../screens/dashboard/DashboardScreen";
-import { CheckInScreen } from "../screens/checkin/CheckInScreen";
-import { ProfileScreen } from "../screens/profile/ProfileScreen";
-import { AttendanceHistoryScreen } from "../screens/attendancehistory/AttendanceHistoryScreen";
-import { AttendanceMonitorScreen } from "../screens/attendancemonitor/AttendanceMonitorScreen";
 import { SchedulerScreen } from "../screens/scheduler/SchedulerScreen";
-import { NotificationsScreen } from "../screens/notifications/NotificationsScreen";
 import { InboxScreen } from "../screens/inbox/InboxScreen";
 import { TeamScreen } from "../screens/team/TeamScreen";
+import { HistoryScreen } from "../screens/history/HistoryScreen";
+import { ReportsScreen } from "../screens/reports/ReportsScreen";
+import { NotificationsScreen } from "../screens/notifications/NotificationsScreen";
+import { ProfileScreen } from "../screens/profile/ProfileScreen";
 import { AvailabilityScreen } from "../screens/availability/AvailabilityScreen";
-import { WeekAssignmentsScreen } from "../screens/weekassignments/WeekAssignmentsScreen";
+import { CheckInScreen } from "../screens/checkin/CheckInScreen";
 
-function RequireAuth({ children }: { children: ReactNode }) {
+function RequireAuth() {
   if (!tokenManager.isLoggedIn()) {
     return <Navigate to={routes.login} replace />;
   }
-
-  return <>{children}</>;
+  return <AppLayout />;
 }
 
 export function AppRoutes() {
@@ -35,9 +34,7 @@ export function AppRoutes() {
     });
   }, [navigate]);
 
-  const startRoute = tokenManager.isLoggedIn()
-    ? routes.dashboard
-    : routes.login;
+  const startRoute = tokenManager.isLoggedIn() ? routes.dashboard : routes.login;
 
   return (
     <Routes>
@@ -47,111 +44,23 @@ export function AppRoutes() {
         path={routes.login}
         element={
           <LoginScreen
-            onLoginSuccess={() => {
-              navigate(routes.dashboard, { replace: true });
-            }}
+            onLoginSuccess={() => navigate(routes.dashboard, { replace: true })}
           />
         }
       />
 
-      <Route
-        path={routes.dashboard}
-        element={
-          <RequireAuth>
-            <DashboardScreen />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path={routes.checkIn}
-        element={
-          <RequireAuth>
-            <CheckInScreen />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path={routes.profile}
-        element={
-          <RequireAuth>
-            <ProfileScreen />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path={routes.attendanceHistory}
-        element={
-          <RequireAuth>
-            <AttendanceHistoryScreen />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path={routes.attendanceMonitor}
-        element={
-          <RequireAuth>
-            <AttendanceMonitorScreen />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path={routes.scheduler}
-        element={
-          <RequireAuth>
-            <SchedulerScreen />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path={routes.notifications}
-        element={
-          <RequireAuth>
-            <NotificationsScreen />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path={routes.inbox}
-        element={
-          <RequireAuth>
-            <InboxScreen />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path={routes.team}
-        element={
-          <RequireAuth>
-            <TeamScreen />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path={routes.availability}
-        element={
-          <RequireAuth>
-            <AvailabilityScreen />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path={routes.weekAssignments}
-        element={
-          <RequireAuth>
-            <WeekAssignmentsScreen />
-          </RequireAuth>
-        }
-      />
+      <Route element={<RequireAuth />}>
+        <Route path={routes.dashboard}     element={<DashboardScreen />} />
+        <Route path={routes.scheduler}     element={<SchedulerScreen />} />
+        <Route path={routes.inbox}         element={<InboxScreen />} />
+        <Route path={routes.team}          element={<TeamScreen />} />
+        <Route path={routes.history}       element={<HistoryScreen />} />
+        <Route path={routes.reports}       element={<ReportsScreen />} />
+        <Route path={routes.notifications} element={<NotificationsScreen />} />
+        <Route path={routes.profile}       element={<ProfileScreen />} />
+        <Route path={routes.availability}  element={<AvailabilityScreen />} />
+        <Route path={routes.checkIn}       element={<CheckInScreen />} />
+      </Route>
     </Routes>
   );
 }

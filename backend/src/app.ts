@@ -59,7 +59,9 @@ const app = express()
 app.use(cors({
   origin: [
     'http://localhost:5173',
+    'http://localhost:5174',
     'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
     'http://192.168.0.30:5173'
   ],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -85,6 +87,7 @@ app.use('/channels', channelsRoutes)
 app.use('/time-off-requests', timeOffRequestsRoutes)
 app.use('/shift-swap-requests', shiftSwapRequestsRoutes)
 app.use('/availability', availabilityRoutes)
+app.use('/activity', activityRoutes)
 
 app.use(errorHandler)
 

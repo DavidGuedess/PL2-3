@@ -1,237 +1,120 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Megaphone, Users, MessageSquare, Check, Plus } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 
-import {
-  createChannel,
-  getChannels,
-  getMessages,
-  sendMessage,
-} from "../../api/messagingApi";
+import { createChannel, deleteChannel, getChannels, getMessages, sendMessage } from "../../api/messagingApi";
 import { getUsers } from "../../api/userApi";
-
 import type { Channel, ChannelMessage } from "../../models/messaging";
 import type { User } from "../../models/user";
-
-import { routes } from "../../navigation/routes";
 import { tokenManager } from "../../storage/tokenManager";
 
-type InboxView =
-  | { kind: "main" }
-  | { kind: "browse" }
-  | {
-      kind: "chat";
-      channelId: number;
-      channelName: string;
-      channelType: string;
-      createdById: number;
-    };
-
-function getInitial(name: string): string {
-  return name.trim().charAt(0).toUpperCase() || "?";
+function initials(name: string) {
+  return name.split(" ").filter(Boolean).slice(0, 2).map(p => p[0].toUpperCase()).join("") || "?";
 }
 
-function getInitials(name: string): string {
-  return (
-    name
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part.charAt(0).toUpperCase())
-      .join("") || "?"
-  );
+function fmtTime(ts: string) {
+  return new Intl.DateTimeFormat("pt-PT", { hour: "2-digit", minute: "2-digit" }).format(new Date(ts));
 }
 
-function formatMessageTime(date: string): string {
-  try {
-    return new Intl.DateTimeFormat("pt-PT", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(date));
-  } catch {
-    return date;
-  }
+function fmtDatetime(ts: string) {
+  return new Intl.DateTimeFormat("pt-PT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(ts));
 }
 
-function formatMessageDate(date: string): string {
-  try {
-    return new Intl.DateTimeFormat("pt-PT", {
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(date));
-  } catch {
-    return date;
-  }
-}
-
-function getDisplayChannelName(
-  channel: Channel,
-  currentUserId: number,
-): string {
-  if (channel.type !== "DM") {
-    return channel.name;
-  }
-
+function dmDisplayName(channel: Channel, currentUserId: number, users: User[]): string {
   const parts = channel.name.split("-");
-
   if (parts.length === 3 && parts[0] === "dm") {
-    const firstId = Number(parts[1]);
-    const secondId = Number(parts[2]);
-    const otherId = firstId === currentUserId ? secondId : firstId;
-
-    return `Mensagem privada #${otherId}`;
+    const a = Number(parts[1]), b = Number(parts[2]);
+    const otherId = a === currentUserId ? b : a;
+    const other = users.find(u => u.id === otherId);
+    return other?.name ?? channel.name;
   }
-
   return channel.name;
 }
 
-async function findOrCreateDmChannel(
-  currentUserId: number,
-  targetUserId: number,
-): Promise<Channel | null> {
-  const dmName = `dm-${Math.min(currentUserId, targetUserId)}-${Math.max(
-    currentUserId,
-    targetUserId,
-  )}`;
-
+async function findOrCreateDm(currentUserId: number, targetId: number): Promise<Channel> {
+  const name = `dm-${Math.min(currentUserId, targetId)}-${Math.max(currentUserId, targetId)}`;
   try {
-    return await createChannel({
-      name: dmName,
-      description: null,
-      isPublic: false,
-      type: "DM",
-      memberIds: [targetUserId],
-    });
+    return await createChannel({ name, type: "DM", memberIds: [targetId] });
   } catch {
-    const channels = await getChannels();
-    return channels.find((channel) => channel.name === dmName) ?? null;
+    const list = await getChannels();
+    const existing = list.find(c => c.name === name);
+    if (existing) return existing;
+    throw new Error("Não foi possível abrir o chat privado.");
   }
 }
 
+type CreateStep = "type" | "form";
+
 export function InboxScreen() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const dmParam = searchParams.get("dm");
 
   const currentUserId = tokenManager.getUserId();
-  const currentRole = tokenManager.getUserRole() ?? "EMPLOYEE";
-  const canCreateChannels =
-    currentRole === "ADMIN" || currentRole === "MANAGER";
+  const role          = tokenManager.getUserRole() ?? "EMPLOYEE";
+  const isEmployee    = role === "EMPLOYEE";
+  const isAdmin       = role === "ADMIN";
 
-  const [view, setView] = useState<InboxView>({ kind: "main" });
+  const [channels,     setChannels]     = useState<Channel[]>([]);
+  const [users,        setUsers]        = useState<User[]>([]);
+  const [activeId,     setActiveId]     = useState<number | null>(null);
+  const [messages,     setMessages]     = useState<ChannelMessage[]>([]);
+  const [msgInput,     setMsgInput]     = useState("");
+  const [isSending,    setIsSending]    = useState(false);
+  const [isLoadingMsg, setIsLoadingMsg] = useState(false);
+  const [showCreate,   setShowCreate]   = useState(false);
+  const [createStep,   setCreateStep]   = useState<CreateStep>("type");
+  const [createType,   setCreateType]   = useState<"GROUP" | "ANNOUNCEMENT">("GROUP");
+  const [newName,      setNewName]      = useState("");
+  const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
+  const [allMembers,   setAllMembers]   = useState(false);
+  const [toast,        setToast]        = useState<string | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const activeChannel = useMemo(() => channels.find(c => c.id === activeId) ?? null, [channels, activeId]);
 
-  const [isLoadingChannels, setIsLoadingChannels] = useState(false);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const [query, setQuery] = useState("");
-
-  const [newChannelName, setNewChannelName] = useState("");
-  const [newChannelDescription, setNewChannelDescription] = useState("");
-  const [newChannelType, setNewChannelType] = useState<
-    "GROUP" | "ANNOUNCEMENT"
-  >("GROUP");
-  const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
-  const [isCreatingChannel, setIsCreatingChannel] = useState(false);
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  }
 
   async function loadChannels() {
-    try {
-      setIsLoadingChannels(true);
-      setErrorMessage(null);
-
-      const result = await getChannels();
-      setChannels(result);
-    } catch {
-      setErrorMessage("Erro ao carregar canais.");
-    } finally {
-      setIsLoadingChannels(false);
-    }
+    const list = await getChannels();
+    setChannels(list);
+    return list;
   }
 
   async function loadUsers() {
-    try {
-      setIsLoadingUsers(true);
+    const list = await getUsers();
+    setUsers(list.filter(u => u.active && u.id !== currentUserId));
+  }
 
-      const result = await getUsers();
-      setUsers(result.filter((user) => user.id !== currentUserId));
-    } catch {
-      setErrorMessage("Erro ao carregar membros da equipa.");
+  async function openChannel(id: number) {
+    setActiveId(id);
+    setIsLoadingMsg(true);
+    setMessages([]);
+    try {
+      const msgs = await getMessages(id);
+      setMessages(msgs);
     } finally {
-      setIsLoadingUsers(false);
+      setIsLoadingMsg(false);
     }
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
   }
 
-  async function openDm(targetUser: User) {
-    try {
-      setErrorMessage(null);
-
-      const channel = await findOrCreateDmChannel(currentUserId, targetUser.id);
-
-      if (!channel) {
-        setErrorMessage("Não foi possível abrir a mensagem privada.");
-        return;
-      }
-
-      setView({
-        kind: "chat",
-        channelId: channel.id,
-        channelName: targetUser.name,
-        channelType: channel.type,
-        createdById: channel.createdById,
-      });
-
-      await loadChannels();
-    } catch {
-      setErrorMessage("Erro ao abrir mensagem privada.");
-    }
-  }
-
-  async function handleCreateChannel(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (newChannelName.trim() === "") {
-      setErrorMessage("O nome do canal é obrigatório.");
-      return;
-    }
-
-    try {
-      setIsCreatingChannel(true);
-      setErrorMessage(null);
-
-      const created = await createChannel({
-        name: newChannelName.trim(),
-        description: newChannelDescription.trim() || null,
-        isPublic: true,
-        type: newChannelType,
-        memberIds: selectedMemberIds,
-      });
-
-      setNewChannelName("");
-      setNewChannelDescription("");
-      setSelectedMemberIds([]);
-      setShowCreateForm(false);
-
-      await loadChannels();
-
-      setView({
-        kind: "chat",
-        channelId: created.id,
-        channelName: created.name,
-        channelType: created.type,
-        createdById: created.createdById,
-      });
-    } catch {
-      setErrorMessage(
-        "Erro ao criar canal. Pode já existir um canal com esse nome.",
-      );
-    } finally {
-      setIsCreatingChannel(false);
-    }
-  }
+  // Auto-open DM if ?dm= param provided
+  useEffect(() => {
+    if (!dmParam) return;
+    const targetId = Number(dmParam);
+    if (!targetId) return;
+    void (async () => {
+      await loadUsers();
+      const ch = await findOrCreateDm(currentUserId, targetId);
+      const list = await loadChannels();
+      // Ensure channel is in list
+      if (!list.find(c => c.id === ch.id)) setChannels(prev => [...prev, ch]);
+      await openChannel(ch.id);
+    })();
+  }, [dmParam]);
 
   useEffect(() => {
     void loadChannels();
@@ -239,536 +122,339 @@ export function InboxScreen() {
   }, []);
 
   useEffect(() => {
-    const dmParam = searchParams.get("dm");
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-    if (!dmParam) {
-      return;
-    }
-
-    const targetUserId = Number(dmParam);
-
-    if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
-      return;
-    }
-
-    async function openInitialDm() {
-      try {
-        const allUsers = users.length > 0 ? users : await getUsers();
-        const targetUser = allUsers.find((user) => user.id === targetUserId);
-
-        if (!targetUser) {
-          return;
-        }
-
-        await openDm(targetUser);
-      } catch {
-        setErrorMessage("Erro ao abrir conversa privada.");
-      }
-    }
-
-    void openInitialDm();
-  }, [searchParams, users]);
-
-  if (view.kind === "chat") {
-    return (
-      <ChatRoomScreen
-        channelId={view.channelId}
-        channelName={view.channelName}
-        channelType={view.channelType}
-        createdById={view.createdById}
-        currentUserId={currentUserId}
-        currentRole={currentRole}
-        onBack={() => {
-          setView({ kind: "main" });
-          void loadChannels();
-        }}
-      />
-    );
-  }
-
-  if (view.kind === "browse") {
-    const filteredChannels = channels.filter((channel) => {
-      return channel.name.toLowerCase().includes(query.trim().toLowerCase());
-    });
-
-    const filteredUsers = users.filter((user) => {
-      const q = query.trim().toLowerCase();
-
-      if (!q) {
-        return true;
-      }
-
-      return (
-        user.name.toLowerCase().includes(q) ||
-        user.email.toLowerCase().includes(q) ||
-        user.employeeNumber.toLowerCase().includes(q)
-      );
-    });
-
-    return (
-      <main className="inbox-page">
-        <section className="inbox-shell">
-          <header className="screen-header dark-header">
-            <button
-              className="secondary-button"
-              onClick={() => setView({ kind: "main" })}
-            >
-              Cancelar
-            </button>
-
-            <div>
-              <h1>Procurar Canais</h1>
-              <p>Canais, grupos e mensagens privadas</p>
-            </div>
-          </header>
-
-          {errorMessage && (
-            <div className="dashboard-error">{errorMessage}</div>
-          )}
-
-          <section className="panel-card inbox-search-card">
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Pesquisar membros ou canais"
-            />
-
-            {canCreateChannels && (
-              <button
-                className={
-                  showCreateForm ? "secondary-pill-button" : "blue-pill-button"
-                }
-                onClick={() => setShowCreateForm((current) => !current)}
-              >
-                {showCreateForm ? "Fechar" : "Criar canal"}
-              </button>
-            )}
-          </section>
-
-          {showCreateForm && canCreateChannels && (
-            <form
-              className="panel-card inbox-create-form"
-              onSubmit={handleCreateChannel}
-            >
-              <h2>Novo canal</h2>
-
-              <label>
-                <span>Tipo</span>
-                <select
-                  value={newChannelType}
-                  onChange={(event) =>
-                    setNewChannelType(
-                      event.target.value as "GROUP" | "ANNOUNCEMENT",
-                    )
-                  }
-                >
-                  <option value="GROUP">Grupo</option>
-                  <option value="ANNOUNCEMENT">Canal de anúncios</option>
-                </select>
-              </label>
-
-              <label>
-                <span>Nome</span>
-                <input
-                  value={newChannelName}
-                  onChange={(event) => setNewChannelName(event.target.value)}
-                  placeholder="Nome do canal"
-                />
-              </label>
-
-              <label>
-                <span>Descrição</span>
-                <input
-                  value={newChannelDescription}
-                  onChange={(event) =>
-                    setNewChannelDescription(event.target.value)
-                  }
-                  placeholder="Descrição opcional"
-                />
-              </label>
-
-              <div className="member-picker">
-                <strong>Membros</strong>
-
-                {users.map((user) => {
-                  const checked = selectedMemberIds.includes(user.id);
-
-                  return (
-                    <label className="member-check-row" key={user.id}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(event) => {
-                          if (event.target.checked) {
-                            setSelectedMemberIds((current) => [
-                              ...current,
-                              user.id,
-                            ]);
-                          } else {
-                            setSelectedMemberIds((current) =>
-                              current.filter((id) => id !== user.id),
-                            );
-                          }
-                        }}
-                      />
-
-                      <span>{user.name}</span>
-                    </label>
-                  );
-                })}
-              </div>
-
-              <button className="primary-button" disabled={isCreatingChannel}>
-                {isCreatingChannel ? "A criar..." : "Criar"}
-              </button>
-            </form>
-          )}
-
-          <section className="inbox-browse-layout">
-            <article className="panel-card">
-              <div className="panel-header">
-                <h2>Canais sugeridos</h2>
-              </div>
-
-              {isLoadingChannels ? (
-                <p className="muted-text">A carregar canais...</p>
-              ) : filteredChannels.length === 0 ? (
-                <p className="muted-text">Sem canais encontrados.</p>
-              ) : (
-                <div className="browse-list">
-                  {filteredChannels.map((channel) => (
-                    <button
-                      className="browse-row"
-                      key={channel.id}
-                      onClick={() =>
-                        setView({
-                          kind: "chat",
-                          channelId: channel.id,
-                          channelName: getDisplayChannelName(
-                            channel,
-                            currentUserId,
-                          ),
-                          channelType: channel.type,
-                          createdById: channel.createdById,
-                        })
-                      }
-                    >
-                      <span className="channel-avatar">
-                        {getInitial(channel.name)}
-                      </span>
-
-                      <span>
-                        <strong>
-                          {getDisplayChannelName(channel, currentUserId)}
-                        </strong>
-                        <small>{channel.description ?? channel.type}</small>
-                      </span>
-
-                      <em>›</em>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </article>
-
-            <article className="panel-card">
-              <div className="panel-header">
-                <h2>Membros da equipa</h2>
-              </div>
-
-              {isLoadingUsers ? (
-                <p className="muted-text">A carregar membros...</p>
-              ) : filteredUsers.length === 0 ? (
-                <p className="muted-text">Sem membros encontrados.</p>
-              ) : (
-                <div className="browse-list">
-                  {filteredUsers.map((user) => (
-                    <button
-                      className="browse-row"
-                      key={user.id}
-                      onClick={() => openDm(user)}
-                    >
-                      <span className="dm-avatar">
-                        {getInitials(user.name)}
-                      </span>
-
-                      <span>
-                        <strong>{user.name}</strong>
-                        <small>
-                          {user.employeeNumber} · {user.role}
-                        </small>
-                      </span>
-
-                      <em>Mensagem</em>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </article>
-          </section>
-        </section>
-      </main>
-    );
-  }
-
-  const sortedChannels = [...channels].sort((a, b) => {
-    const aLast = a.messages?.[0]?.createdAt ?? a.updatedAt;
-    const bLast = b.messages?.[0]?.createdAt ?? b.updatedAt;
-
-    return bLast.localeCompare(aLast);
-  });
-
-  return (
-    <main className="inbox-page">
-      <section className="inbox-shell">
-        <header className="screen-header dark-header">
-          <button
-            className="secondary-button"
-            onClick={() => navigate(routes.dashboard)}
-          >
-            Voltar
-          </button>
-
-          <div>
-            <h1>Caixa</h1>
-            <p>Mensagens internas e canais da equipa</p>
-          </div>
-
-          <button
-            className="primary-small-button"
-            onClick={() => setView({ kind: "browse" })}
-          >
-            +
-          </button>
-        </header>
-
-        {errorMessage && <div className="dashboard-error">{errorMessage}</div>}
-
-        <section className="panel-card">
-          <div className="panel-header">
-            <h2>Canais</h2>
-
-            <button onClick={loadChannels} disabled={isLoadingChannels}>
-              {isLoadingChannels ? "A carregar..." : "Atualizar"}
-            </button>
-          </div>
-
-          {isLoadingChannels ? (
-            <p className="muted-text">A carregar canais...</p>
-          ) : sortedChannels.length === 0 ? (
-            <p className="muted-text">Sem canais disponíveis.</p>
-          ) : (
-            <div className="channel-list">
-              {sortedChannels.map((channel) => {
-                const lastMessage = channel.messages?.[0];
-
-                return (
-                  <button
-                    className="channel-row"
-                    key={channel.id}
-                    onClick={() =>
-                      setView({
-                        kind: "chat",
-                        channelId: channel.id,
-                        channelName: getDisplayChannelName(
-                          channel,
-                          currentUserId,
-                        ),
-                        channelType: channel.type,
-                        createdById: channel.createdById,
-                      })
-                    }
-                  >
-                    <span className="channel-avatar">
-                      {getInitial(
-                        getDisplayChannelName(channel, currentUserId),
-                      )}
-                    </span>
-
-                    <span>
-                      <strong>
-                        {getDisplayChannelName(channel, currentUserId)}
-                      </strong>
-
-                      {lastMessage ? (
-                        <small>
-                          {lastMessage.user.name}: {lastMessage.content}
-                        </small>
-                      ) : (
-                        <small>{channel.description ?? "Sem mensagens"}</small>
-                      )}
-                    </span>
-
-                    <em>
-                      {lastMessage
-                        ? formatMessageTime(lastMessage.createdAt)
-                        : "›"}
-                    </em>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <button
-            className="browse-more-row"
-            onClick={() => setView({ kind: "browse" })}
-          >
-            <span>+ Procurar canais ou mensagens privadas</span>
-            <small>
-              Encontra canais, grupos ou abre conversa direta com um colega.
-            </small>
-          </button>
-        </section>
-      </section>
-    </main>
-  );
-}
-
-interface ChatRoomScreenProps {
-  channelId: number;
-  channelName: string;
-  channelType: string;
-  createdById: number;
-  currentUserId: number;
-  currentRole: string;
-  onBack: () => void;
-}
-
-function ChatRoomScreen({
-  channelId,
-  channelName,
-  channelType,
-  currentUserId,
-  currentRole,
-  onBack,
-}: ChatRoomScreenProps) {
-  const [messages, setMessages] = useState<ChannelMessage[]>([]);
-  const [draft, setDraft] = useState("");
-  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const canSendMessage = useMemo(() => {
-    if (channelType !== "ANNOUNCEMENT") {
-      return true;
-    }
-
-    return currentRole === "ADMIN" || currentRole === "MANAGER";
-  }, [channelType, currentRole]);
-
-  async function loadMessages() {
+  async function handleSend(e: FormEvent) {
+    e.preventDefault();
+    if (!activeId || !msgInput.trim() || isSending) return;
+    setIsSending(true);
     try {
-      setIsLoadingMessages(true);
-      setErrorMessage(null);
-
-      const result = await getMessages(channelId);
-      setMessages(
-        result.sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-      );
-    } catch {
-      setErrorMessage("Erro ao carregar mensagens.");
-    } finally {
-      setIsLoadingMessages(false);
-    }
-  }
-
-  async function handleSend(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const content = draft.trim();
-
-    if (!content) {
-      return;
-    }
-
-    try {
-      setIsSending(true);
-      setErrorMessage(null);
-
-      const created = await sendMessage(channelId, { content });
-
-      setMessages((current) => [...current, created]);
-      setDraft("");
-    } catch {
-      setErrorMessage("Erro ao enviar mensagem.");
+      const msg = await sendMessage(activeId, { content: msgInput.trim() });
+      setMessages(prev => [...prev, msg]);
+      setMsgInput("");
     } finally {
       setIsSending(false);
     }
   }
 
-  useEffect(() => {
-    void loadMessages();
-  }, [channelId]);
+  async function handleDelete() {
+    if (!activeId) return;
+    if (!window.confirm("Apagar esta conversa?")) return;
+    await deleteChannel(activeId);
+    setActiveId(null);
+    setMessages([]);
+    await loadChannels();
+    showToast("Conversa apagada.");
+  }
+
+  async function handleCreateDm(targetId: number) {
+    try {
+      const ch = await findOrCreateDm(currentUserId, targetId);
+      const list = await loadChannels();
+      if (!list.find(c => c.id === ch.id)) setChannels(prev => [...prev, ch]);
+      await openChannel(ch.id);
+    } catch {
+      showToast("Erro ao abrir chat privado.");
+    }
+  }
+
+  async function handleCreateChannel(e: FormEvent) {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    const memberIds = allMembers
+      ? users.map(u => u.id)
+      : selectedMembers;
+    try {
+      const ch = await createChannel({ name: newName.trim(), type: createType, memberIds });
+      await loadChannels();
+      setShowCreate(false);
+      setNewName(""); setSelectedMembers([]); setAllMembers(false);
+      await openChannel(ch.id);
+      showToast("Canal criado.");
+    } catch {
+      showToast("Erro ao criar canal.");
+    }
+  }
+
+  function toggleMember(id: number) {
+    setSelectedMembers(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id],
+    );
+  }
+
+  // Split channels
+  const groupChannels = channels.filter(c => c.type === "GROUP" || c.type === "ANNOUNCEMENT" || !c.type);
+  const dmChannels    = channels.filter(c => c.type === "DM");
+
+  // Permissions for current active channel
+  const canSend = activeChannel && !(isEmployee && activeChannel.type === "ANNOUNCEMENT");
+  // DM: any member can delete; GROUP: ADMIN or MANAGER; ANNOUNCEMENT: ADMIN only
+  const canDelete = activeChannel && (
+    activeChannel.type === "DM" ||
+    (activeChannel.type === "GROUP" && !isEmployee) ||
+    (activeChannel.type === "ANNOUNCEMENT" && isAdmin)
+  );
 
   return (
-    <main className="chat-page">
-      <section className="chat-shell">
-        <header className="chat-header">
-          <button className="secondary-button" onClick={onBack}>
-            Voltar
-          </button>
+    <div className="inbox-page">
+      {/* Left sidebar */}
+      <div className="inbox-sidebar">
+        <div className="inbox-header">
+          <h2>Chats</h2>
+        </div>
 
-          <div>
-            <h1>{channelName}</h1>
-            <p>{channelType === "DM" ? "Mensagem privada" : channelType}</p>
+        {/* Channels */}
+        <div className="channel-section">
+          <div className="channel-section-header">
+            <span>Canais</span>
+            {!isEmployee && (
+              <button title="Novo canal" onClick={() => { setShowCreate(true); setCreateStep("type"); }}>
+                <Plus size={14} />
+              </button>
+            )}
           </div>
-
-          <button onClick={loadMessages} disabled={isLoadingMessages}>
-            Atualizar
-          </button>
-        </header>
-
-        {errorMessage && <div className="dashboard-error">{errorMessage}</div>}
-
-        <section className="chat-panel-unified">
-          <div className="chat-scroll-area">
-            {isLoadingMessages ? (
-              <p className="muted-text">A carregar mensagens...</p>
-            ) : messages.length === 0 ? (
-              <p className="muted-text">Ainda não existem mensagens.</p>
-            ) : (
-              <div className="chat-message-list">
-                {messages.map((message) => {
-                  const isMine = message.userId === currentUserId;
-
-                  return (
-                    <article
-                      className={`chat-message ${isMine ? "mine" : "theirs"}`}
-                      key={message.id}
-                    >
-                      <div>
-                        <strong>{isMine ? "Tu" : message.user.name}</strong>
-                        <p>{message.content}</p>
-                        <small>{formatMessageDate(message.createdAt)}</small>
-                      </div>
-                    </article>
-                  );
-                })}
+          {groupChannels.map(ch => (
+            <button
+              key={ch.id}
+              className={`channel-item${ch.id === activeId ? " active" : ""}`}
+              onClick={() => openChannel(ch.id)}
+            >
+              <div className={`channel-icon ${ch.type === "ANNOUNCEMENT" ? "announcement" : "group"}`}>
+                {ch.type === "ANNOUNCEMENT" ? <Megaphone size={16} /> : <Users size={16} />}
               </div>
+              <div className="channel-item-text">
+                <div className="channel-item-name">{ch.name === "Todos" ? "Todos" : ch.name}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* DMs */}
+        <div className="channel-section dm-section">
+          <div className="channel-section-header">
+            <span>Mensagens diretas</span>
+            <button title="Nova mensagem privada" onClick={() => { setShowCreate(true); setCreateStep("type"); }}>
+              <Plus size={14} />
+            </button>
+          </div>
+          {dmChannels.map(ch => {
+            const displayName = dmDisplayName(ch, currentUserId, users);
+            return (
+              <button
+                key={ch.id}
+                className={`channel-item${ch.id === activeId ? " active" : ""}`}
+                onClick={() => openChannel(ch.id)}
+              >
+                <div className="channel-icon dm">{initials(displayName)}</div>
+                <div className="channel-item-text">
+                  <div className="channel-item-name">{displayName}</div>
+                </div>
+              </button>
+            );
+          })}
+
+          {/* List all users to start DM */}
+          {users.map(u => {
+            const hasDm = dmChannels.some(ch => {
+              const p = ch.name.split("-");
+              return p.length === 3 && p[0] === "dm" && (Number(p[1]) === u.id || Number(p[2]) === u.id);
+            });
+            if (hasDm) return null;
+            return (
+              <button
+                key={`new-dm-${u.id}`}
+                className="channel-item"
+                onClick={() => handleCreateDm(u.id)}
+                title={`Mensagem para ${u.name}`}
+              >
+                <div className="channel-icon dm" style={{ opacity: 0.5 }}>{initials(u.name)}</div>
+                <div className="channel-item-text">
+                  <div className="channel-item-name" style={{ color: "var(--text-faint)" }}>{u.name}</div>
+                  <div className="channel-item-preview">Iniciar conversa</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Chat area */}
+      {activeChannel ? (
+        <div className="chat-area">
+          <div className="chat-header">
+            <div className="chat-header-left">
+              <div className={`channel-icon ${activeChannel.type === "ANNOUNCEMENT" ? "announcement" : activeChannel.type === "DM" ? "dm" : "group"}`} style={{ width: 36, height: 36 }}>
+                {activeChannel.type === "ANNOUNCEMENT" ? <Megaphone size={16} /> : activeChannel.type === "DM" ? initials(dmDisplayName(activeChannel, currentUserId, users)) : <Users size={16} />}
+              </div>
+              <div>
+                <div className="chat-header-name">
+                  {activeChannel.type === "DM"
+                    ? dmDisplayName(activeChannel, currentUserId, users)
+                    : activeChannel.name}
+                </div>
+                <div className="chat-header-desc">
+                  {activeChannel.type === "DM" ? "Mensagem privada" : activeChannel.type === "ANNOUNCEMENT" ? "Canal de anúncios" : "Canal de grupo"}
+                </div>
+              </div>
+            </div>
+            {canDelete && (
+              <button className="btn btn-danger btn-sm" onClick={handleDelete}>Apagar conversa</button>
             )}
           </div>
 
-          {canSendMessage ? (
-            <form className="chat-input-bar" onSubmit={handleSend}>
-              <input
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder="Mensagem"
-                disabled={isSending}
-              />
+          {isLoadingMsg ? (
+            <div className="loading-state">A carregar mensagens...</div>
+          ) : (
+            <div className="chat-messages">
+              {messages.length === 0 && (
+                <div className="chat-empty">Sem mensagens. Seja o primeiro a escrever!</div>
+              )}
+              {messages.map(msg => {
+                const isOwn = msg.userId === currentUserId;
+                const senderName = isOwn ? "Eu" : (msg.user?.name ?? `Utilizador #${msg.userId}`);
+                return (
+                  <div key={msg.id} className={`chat-msg${isOwn ? " own" : ""}`}>
+                    <div className="msg-avatar">{initials(senderName)}</div>
+                    <div className="msg-body">
+                      <div className="msg-meta">{senderName} · {fmtDatetime(msg.createdAt)}</div>
+                      <div className="msg-bubble">{msg.content}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={bottomRef} />
+            </div>
+          )}
 
-              <button disabled={isSending || draft.trim() === ""}>
+          {canSend ? (
+            <form className="chat-input-row" onSubmit={handleSend}>
+              <input
+                value={msgInput}
+                onChange={e => setMsgInput(e.target.value)}
+                placeholder="Enviar uma mensagem..."
+                autoFocus
+              />
+              <button type="submit" className="btn btn-primary btn-sm" disabled={isSending || !msgInput.trim()}>
                 {isSending ? "..." : "Enviar"}
               </button>
             </form>
           ) : (
-            <section className="chat-input-bar disabled">
-              Apenas administradores/gestores podem escrever neste canal.
-            </section>
+            <div className="chat-readonly-notice">
+              Apenas gestores podem enviar mensagens neste canal.
+            </div>
           )}
-        </section>
-      </section>
-    </main>
+        </div>
+      ) : (
+        <div className="chat-area">
+          <div className="chat-welcome">
+            <MessageSquare size={36} color="var(--text-faint)" />
+            <span>Seleciona um canal ou conversa para começar</span>
+          </div>
+        </div>
+      )}
+
+      {/* Create channel modal */}
+      {showCreate && (
+        <div className="modal-overlay" onClick={() => setShowCreate(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            {createStep === "type" ? (
+              <>
+                <h3>Nova conversa</h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+                  {!isEmployee && (
+                    <>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ justifyContent: "flex-start", gap: 12, padding: "14px 16px" }}
+                        onClick={() => { setCreateType("GROUP"); setCreateStep("form"); }}
+                      >
+                        <Users size={22} color="var(--text-muted)" />
+                        <span><strong>Grupo</strong><br /><small style={{ color: "var(--text-muted)" }}>Chat com vários membros</small></span>
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ justifyContent: "flex-start", gap: 12, padding: "14px 16px" }}
+                        onClick={() => { setCreateType("ANNOUNCEMENT"); setCreateStep("form"); }}
+                      >
+                        <Megaphone size={22} color="var(--text-muted)" />
+                        <span><strong>Anúncios</strong><br /><small style={{ color: "var(--text-muted)" }}>Canal de comunicados</small></span>
+                      </button>
+                    </>
+                  )}
+                  <p style={{ fontSize: 13, color: "var(--text-muted)", textAlign: "center" }}>
+                    Ou clica num utilizador na lista para iniciar uma mensagem privada.
+                  </p>
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setShowCreate(false)}>Cancelar</button>
+                </div>
+              </>
+            ) : (
+              <form onSubmit={handleCreateChannel}>
+                <h3>{createType === "GROUP" ? "Novo grupo" : "Novo canal de anúncios"}</h3>
+
+                <div className="form-group">
+                  <label>Nome</label>
+                  <input
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    placeholder="Nome do canal..."
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                {createType === "ANNOUNCEMENT" && (
+                  <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      id="allm"
+                      checked={allMembers}
+                      onChange={e => setAllMembers(e.target.checked)}
+                      style={{ width: "auto" }}
+                    />
+                    <label htmlFor="allm" style={{ textTransform: "none", letterSpacing: 0, fontSize: 14 }}>
+                      Adicionar todos os membros
+                    </label>
+                  </div>
+                )}
+
+                {!allMembers && (
+                  <div className="form-group">
+                    <label>Membros</label>
+                    <div className="member-list">
+                      {users.map(u => (
+                        <div
+                          key={u.id}
+                          className={`member-item${selectedMembers.includes(u.id) ? " selected" : ""}`}
+                          onClick={() => toggleMember(u.id)}
+                        >
+                          <div className="user-avatar sm">{initials(u.name)}</div>
+                          <span className="member-item-name">{u.name}</span>
+                          <span className="member-item-role">{u.employeeNumber}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="form-actions">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCreateStep("type")}>Voltar</button>
+                  <button type="submit" className="btn btn-primary btn-sm">Criar</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="toast-container">
+          <div className="toast"><Check size={15} /> {toast}</div>
+        </div>
+      )}
+    </div>
   );
 }

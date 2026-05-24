@@ -1,14 +1,16 @@
 export const routes = {
   login: "/login",
   dashboard: "/dashboard",
-  checkIn: "/checkin",
-  profile: "/profile",
-  attendanceHistory: "/attendance-history",
-  attendanceMonitor: "/attendance-monitor",
   scheduler: "/scheduler",
-  notifications: "/notifications",
   inbox: "/inbox",
   team: "/team",
+  history: "/history",
+  reports: "/reports",
+  notifications: "/notifications",
+  profile: "/profile",
   availability: "/availability",
-  weekAssignments: "/week-assignments"
+  checkIn: "/checkin",
+  attendanceHistory: "/attendance-history",
+  attendanceMonitor: "/attendance-monitor",
+  weekAssignments: "/week-assignments",
 };

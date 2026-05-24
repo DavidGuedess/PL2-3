@@ -17,11 +17,27 @@ router.use((req, _res, next) => {
 })
 
 // GET /time-off-requests
-// EMPLOYEE: only own; ADMIN/MANAGER: all
+// EMPLOYEE: only own; ADMIN/MANAGER: all (with optional ?userId, ?from, ?to filters)
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId, role } = req.user!
-    const where = (role === 'ADMIN' || role === 'MANAGER') ? {} : { userId }
+    const isManager = role === 'ADMIN' || role === 'MANAGER'
+
+    const where: any = isManager ? {} : { userId }
+
+    if (isManager && req.query.userId) {
+      where.userId = parseInt(req.query.userId as string)
+    }
+
+    if (req.query.from || req.query.to) {
+      where.createdAt = {}
+      if (req.query.from) where.createdAt.gte = new Date(req.query.from as string)
+      if (req.query.to) {
+        const toDate = new Date(req.query.to as string)
+        toDate.setUTCHours(23, 59, 59, 999)
+        where.createdAt.lte = toDate
+      }
+    }
 
     const requests = await prisma.timeOffRequest.findMany({
       where,

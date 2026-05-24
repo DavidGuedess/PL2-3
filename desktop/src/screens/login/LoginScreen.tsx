@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { PawPrint } from "lucide-react";
 import { login } from "../../api/authApi";
 import { tokenManager } from "../../storage/tokenManager";
 
@@ -48,7 +49,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     <main className="login-page">
       <form className="login-card" onSubmit={handleLogin}>
         <div className="login-header">
-          <h1>🐾 MiauGenda</h1>
+          <h1 style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><PawPrint size={22} /> MiauGenda</h1>
           <p>Sistema de Gestão de Turnos</p>
         </div>
 

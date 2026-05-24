@@ -1,575 +1,360 @@
 import { useEffect, useMemo, useState } from "react";
+import { Clock, Coffee, Timer, ClipboardList, CalendarDays, User, Unlock, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import {
-  getActiveEmployees,
-  getMyAttendanceHistory,
-  registerAttendance,
-} from "../../api/attendanceApi";
+import { getActiveEmployees, getMyAttendanceHistory } from "../../api/attendanceApi";
 import { getMyShifts, getShifts } from "../../api/shiftApi";
-import { getShiftSwapRequests, getTimeOffRequests } from "../../api/requestApi";
-
-import type { ActiveEmployee, AttendanceRecord } from "../../models/attendance";
+import { getTimeOffRequests, getShiftSwapRequests } from "../../api/requestApi";
+import { resolvedStartTime, resolvedEndTime } from "../../models/shift";
 import type { Shift } from "../../models/shift";
-import type { ShiftSwapRequest, TimeOffRequest } from "../../models/request";
-
-import {
-  resolvedEndTime,
-  resolvedName,
-  resolvedStartTime,
-} from "../../models/shift";
+import type { TimeOffRequest, ShiftSwapRequest } from "../../models/request";
+import type { AttendanceRecord } from "../../models/attendance";
 import { routes } from "../../navigation/routes";
 import { tokenManager } from "../../storage/tokenManager";
 
-import { DashboardRequestActions } from "./DashboardRequestActions";
+function getToday() { return new Date().toISOString().slice(0, 10); }
 
-interface DashboardState {
-  shifts: Shift[];
-  attendanceRecords: AttendanceRecord[];
-  activeEmployees: ActiveEmployee[];
-  timeOffRequests: TimeOffRequest[];
-  shiftSwapRequests: ShiftSwapRequest[];
-  allWeekShiftsCount: number;
-  isLoading: boolean;
-  error: string | null;
-  isClocked: boolean;
-  clockedInSince: string | null;
+function mondayOf(date: Date): string {
+  const d = new Date(date);
+  const day = d.getDay();
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  return d.toISOString().slice(0, 10);
 }
 
-const initialState: DashboardState = {
-  shifts: [],
-  attendanceRecords: [],
-  activeEmployees: [],
-  timeOffRequests: [],
-  shiftSwapRequests: [],
-  allWeekShiftsCount: 0,
-  isLoading: true,
-  error: null,
-  isClocked: false,
-  clockedInSince: null,
-};
-
-function getWeekStart(date: Date): string {
-  const copy = new Date(date);
-  const day = copy.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-
-  copy.setDate(copy.getDate() + diff);
-
-  return copy.toISOString().slice(0, 10);
+function addWeeks(base: string, n: number): string {
+  const d = new Date(base);
+  d.setDate(d.getDate() + n * 7);
+  return d.toISOString().slice(0, 10);
 }
 
-function getToday(): string {
-  return new Date().toISOString().slice(0, 10);
+function weekEnd(start: string): string {
+  const d = new Date(start);
+  d.setDate(d.getDate() + 6);
+  return d.toISOString().slice(0, 10);
 }
 
-function getGreeting(): string {
-  const hour = new Date().getHours();
+function fmtWeek(start: string): string {
+  const end = weekEnd(start);
+  return `${start.slice(8, 10)} — ${end.slice(8, 10)} de ${
+    new Intl.DateTimeFormat("pt-PT", { month: "short" }).format(new Date(end + "T12:00"))
+  }. ${end.slice(0, 4)}`;
+}
 
-  if (hour >= 5 && hour <= 11) {
-    return "Bom dia";
-  }
+function fmtDate(date: string) {
+  return new Intl.DateTimeFormat("pt-PT", { weekday: "short", day: "2-digit", month: "short" }).format(new Date(date.slice(0, 10) + "T12:00"));
+}
 
-  if (hour >= 12 && hour <= 18) {
-    return "Boa tarde";
-  }
+function fmtTime(ts: string) {
+  return new Intl.DateTimeFormat("pt-PT", { hour: "2-digit", minute: "2-digit" }).format(new Date(ts));
+}
 
+function greeting() {
+  const h = new Date().getHours();
+  if (h >= 5 && h <= 11)  return "Bom dia";
+  if (h >= 12 && h <= 18) return "Boa tarde";
   return "Boa noite";
 }
 
-function formatDate(date: string): string {
-  try {
-    return new Intl.DateTimeFormat("pt-PT", {
-      weekday: "short",
-      day: "2-digit",
-      month: "short",
-    }).format(new Date(date));
-  } catch {
-    return date.slice(0, 10);
-  }
-}
-
-function formatTime(timestamp: string): string {
-  try {
-    return new Intl.DateTimeFormat("pt-PT", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(timestamp));
-  } catch {
-    return timestamp;
-  }
-}
-
-function calculateTodayWorked(records: AttendanceRecord[]): string {
+function calcWorked(records: AttendanceRecord[]): string {
   const today = getToday();
-
-  const dayRecords = records
-    .filter((record) => record.timestamp.slice(0, 10) === today)
+  const sorted = records
+    .filter(r => r.timestamp.slice(0, 10) === today)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-
-  let totalMinutes = 0;
-  let lastIn: AttendanceRecord | null = null;
-
-  for (const record of dayRecords) {
-    if (record.type === "IN") {
-      lastIn = record;
-    } else if (record.type === "OUT" && lastIn) {
-      const start = new Date(lastIn.timestamp).getTime();
-      const end = new Date(record.timestamp).getTime();
-
-      totalMinutes += Math.max(0, Math.floor((end - start) / 60000));
+  let mins = 0, lastIn: string | null = null;
+  for (const r of sorted) {
+    if (r.type === "IN") lastIn = r.timestamp;
+    else if (r.type === "OUT" && lastIn) {
+      mins += Math.max(0, Math.floor((new Date(r.timestamp).getTime() - new Date(lastIn).getTime()) / 60000));
       lastIn = null;
     }
   }
-
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}min`;
-  }
-
-  if (minutes > 0) {
-    return `${minutes}min`;
-  }
-
+  const h = Math.floor(mins / 60), m = mins % 60;
+  if (h > 0) return `${h}h ${m}min`;
+  if (m > 0) return `${m}min`;
   return "—";
 }
 
-function getElapsedTimer(clockedInSince: string | null): string {
-  if (!clockedInSince) {
-    return "00:00:00";
-  }
-
-  const diffSeconds = Math.max(
-    0,
-    Math.floor((Date.now() - new Date(clockedInSince).getTime()) / 1000),
-  );
-
-  const hours = Math.floor(diffSeconds / 3600);
-  const minutes = Math.floor((diffSeconds % 3600) / 60);
-  const seconds = diffSeconds % 60;
-
-  return [
-    String(hours).padStart(2, "0"),
-    String(minutes).padStart(2, "0"),
-    String(seconds).padStart(2, "0"),
-  ].join(":");
+function statusLabel(s: string) {
+  if (s === "PENDING") return "Pendente";
+  if (s === "APPROVED") return "Aprovado";
+  if (s === "REJECTED") return "Rejeitado";
+  return s;
 }
 
 export function DashboardScreen() {
   const navigate = useNavigate();
+  const userId      = tokenManager.getUserId();
+  const name        = tokenManager.getUserName() ?? "Utilizador";
+  const firstName   = name.split(" ")[0];
 
-  const currentRole = tokenManager.getUserRole();
-  const canViewManagementScreens =
-    currentRole === "ADMIN" || currentRole === "MANAGER";
+  const today     = getToday();
+  const [weekStart, setWeekStart] = useState(mondayOf(new Date()));
 
-  const [state, setState] = useState<DashboardState>(initialState);
-  const [timer, setTimer] = useState("00:00:00");
-  const [isClockActionLoading, setIsClockActionLoading] = useState(false);
+  const [shifts,       setShifts]       = useState<Shift[]>([]);
+  const [attendance,   setAttendance]   = useState<AttendanceRecord[]>([]);
+  const [activeCount,  setActiveCount]  = useState(0);
+  const [timeOffs,     setTimeOffs]     = useState<TimeOffRequest[]>([]);
+  const [swaps,        setSwaps]        = useState<ShiftSwapRequest[]>([]);
+  const [allWeekCount, setAllWeekCount] = useState(0);
+  const [isLoading,    setIsLoading]    = useState(true);
 
-  const fullName = tokenManager.getUserName() ?? "Utilizador";
-  const firstName = fullName.split(" ")[0] || "Utilizador";
-  const currentUserId = tokenManager.getUserId();
+  const wEnd = weekEnd(weekStart);
 
-  const today = getToday();
-  const weekStart = useMemo(() => getWeekStart(new Date()), []);
-
-  const todayShift = useMemo(() => {
-    return (
-      state.shifts.find((shift) => {
-        return shift.published && shift.date.slice(0, 10) === today;
-      }) ?? null
-    );
-  }, [state.shifts, today]);
-
-  const pendingRequestsCount = useMemo(() => {
-    const myTimeOff = state.timeOffRequests.filter((request) => {
-      return request.userId === currentUserId && request.status === "PENDING";
-    });
-
-    const mySwaps = state.shiftSwapRequests.filter((request) => {
-      return (
-        request.requesterId === currentUserId && request.status === "PENDING"
-      );
-    });
-
-    return myTimeOff.length + mySwaps.length;
-  }, [state.timeOffRequests, state.shiftSwapRequests, currentUserId]);
-
-  const publishedWeekShifts = useMemo(() => {
-    return state.shifts
-      .filter((shift) => shift.published)
-      .sort((a, b) => a.date.localeCompare(b.date));
-  }, [state.shifts]);
-
-  async function loadDashboard() {
+  async function load() {
+    setIsLoading(true);
     try {
-      setState((current) => ({
-        ...current,
-        isLoading: true,
-        error: null,
-      }));
-
-      const weekEndDate = new Date(weekStart);
-      weekEndDate.setDate(weekEndDate.getDate() + 6);
-      const weekEnd = weekEndDate.toISOString().slice(0, 10);
-
-      const [
-        myShiftsResult,
-        allShiftsResult,
-        attendanceResult,
-        activeEmployeesResult,
-        timeOffResult,
-        swapsResult,
-      ] = await Promise.allSettled([
+      const [s, allS, att, active, tor, ssr] = await Promise.allSettled([
         getMyShifts({ week: weekStart }),
         getShifts({ week: weekStart }),
-        getMyAttendanceHistory({ from: weekStart, to: weekEnd }),
+        getMyAttendanceHistory({ from: weekStart, to: wEnd }),
         getActiveEmployees(),
         getTimeOffRequests(),
         getShiftSwapRequests(),
       ]);
-
-      const myShifts =
-        myShiftsResult.status === "fulfilled" ? myShiftsResult.value : [];
-
-      const allShifts =
-        allShiftsResult.status === "fulfilled" ? allShiftsResult.value : [];
-
-      const attendanceRecords =
-        attendanceResult.status === "fulfilled" ? attendanceResult.value : [];
-
-      const activeEmployees =
-        activeEmployeesResult.status === "fulfilled"
-          ? activeEmployeesResult.value
-          : [];
-
-      const timeOffRequests =
-        timeOffResult.status === "fulfilled" ? timeOffResult.value : [];
-
-      const shiftSwapRequests =
-        swapsResult.status === "fulfilled" ? swapsResult.value : [];
-
-      const todayRecords = attendanceRecords
-        .filter((record) => record.timestamp.slice(0, 10) === today)
-        .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-
-      const lastRecord =
-        todayRecords.length > 0
-          ? todayRecords[todayRecords.length - 1]
-          : undefined;
-
-      const isClocked = lastRecord?.type === "IN";
-
-      setState({
-        shifts: myShifts,
-        attendanceRecords,
-        activeEmployees,
-        timeOffRequests,
-        shiftSwapRequests,
-        allWeekShiftsCount: allShifts.filter((shift) => shift.published).length,
-        isLoading: false,
-        error: null,
-        isClocked,
-        clockedInSince: isClocked ? (lastRecord?.timestamp ?? null) : null,
-      });
-    } catch {
-      setState((current) => ({
-        ...current,
-        isLoading: false,
-        error: "Erro ao carregar dashboard",
-      }));
-    }
-  }
-
-  async function handleClockIn() {
-    try {
-      setIsClockActionLoading(true);
-
-      const record = await registerAttendance({
-        type: "IN",
-      });
-
-      setState((current) => ({
-        ...current,
-        isClocked: true,
-        clockedInSince: record.timestamp,
-        attendanceRecords: [record, ...current.attendanceRecords],
-      }));
-    } catch {
-      setState((current) => ({
-        ...current,
-        error: "Erro ao registar entrada",
-      }));
+      setShifts(s.status === "fulfilled" ? s.value : []);
+      setAllWeekCount(allS.status === "fulfilled" ? allS.value.filter(x => x.published).length : 0);
+      setAttendance(att.status === "fulfilled" ? att.value : []);
+      setActiveCount(active.status === "fulfilled" ? active.value.length : 0);
+      setTimeOffs(tor.status === "fulfilled" ? tor.value : []);
+      setSwaps(ssr.status === "fulfilled" ? ssr.value : []);
     } finally {
-      setIsClockActionLoading(false);
+      setIsLoading(false);
     }
   }
 
-  async function handleClockOut() {
-    try {
-      setIsClockActionLoading(true);
+  useEffect(() => { void load(); }, [weekStart]);
 
-      const record = await registerAttendance({
-        type: "OUT",
-      });
+  const todayShift = useMemo(() =>
+    shifts.find(s => s.published && s.date.slice(0, 10) === today) ?? null,
+    [shifts, today],
+  );
 
-      setState((current) => ({
-        ...current,
-        isClocked: false,
-        clockedInSince: null,
-        attendanceRecords: [record, ...current.attendanceRecords],
-      }));
-    } catch {
-      setState((current) => ({
-        ...current,
-        error: "Erro ao registar saída",
-      }));
-    } finally {
-      setIsClockActionLoading(false);
-    }
-  }
+  const publishedWeekShifts = useMemo(() =>
+    shifts.filter(s => s.published).sort((a, b) => a.date.localeCompare(b.date)),
+    [shifts],
+  );
 
-  function handleLogout() {
-    tokenManager.clearTokens();
-    navigate(routes.login, { replace: true });
-  }
+  const myTimeOffs  = timeOffs.filter(r => r.userId === userId);
+  const mySwaps     = swaps.filter(r => r.requesterId === userId);
+  const pendingCount = myTimeOffs.filter(r => r.status === "PENDING").length
+                     + mySwaps.filter(r => r.status === "PENDING").length;
 
-  useEffect(() => {
-    void loadDashboard();
-  }, []);
+  const todayTimeOffs = timeOffs.filter(r =>
+    r.status === "APPROVED" &&
+    new Date(r.startDate) <= new Date(today) &&
+    new Date(r.endDate)   >= new Date(today)
+  ).length;
 
-  useEffect(() => {
-    setTimer(getElapsedTimer(state.clockedInSince));
-
-    const interval = window.setInterval(() => {
-      setTimer(getElapsedTimer(state.clockedInSince));
-    }, 1000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [state.clockedInSince]);
+  const worked = calcWorked(attendance);
 
   return (
-    <main className="dashboard-page">
-      <section className="dashboard-shell">
-        <header className="dashboard-header">
-          <button
-            className="avatar-button"
-            onClick={() => navigate(routes.profile)}
-          >
-            {firstName.charAt(0).toUpperCase()}
-          </button>
+    <>
+      <div className="dashboard-greeting">
+        <h1>{greeting()}, {firstName}!</h1>
+        <p>MiauGenda · {new Intl.DateTimeFormat("pt-PT", { weekday: "long", day: "numeric", month: "long" }).format(new Date())}</p>
+      </div>
 
-          <div>
-            <h1>
-              {getGreeting()}, {firstName}!
-            </h1>
-            <p>MiauGenda Desktop</p>
-          </div>
-
-          <button className="secondary-button" onClick={handleLogout}>
-            Terminar sessão
-          </button>
-        </header>
-
-        {state.error && <div className="dashboard-error">{state.error}</div>}
-
-        {state.isLoading ? (
-          <section className="dashboard-loading">
-            A carregar dashboard...
-          </section>
-        ) : (
-          <>
-            <section className="clock-card">
-              <div>
-                <span className="section-kicker">Registo de ponto</span>
-
-                {todayShift ? (
-                  <>
-                    <h2>
-                      {resolvedStartTime(todayShift)} -{" "}
-                      {resolvedEndTime(todayShift)}
-                    </h2>
-                    <p>{resolvedName(todayShift)}</p>
-                  </>
-                ) : (
-                  <>
-                    <h2>Sem turno agendado hoje</h2>
-                    <p>A entrada será registada como não programada.</p>
-                  </>
-                )}
-
-                {state.isClocked && state.clockedInSince && (
-                  <p className="clock-status">
-                    Entrada registada às {formatTime(state.clockedInSince)} ·{" "}
-                    {timer}
-                  </p>
-                )}
+      {isLoading ? (
+        <div className="loading-state">A carregar...</div>
+      ) : (
+        <>
+          {/* Summary row */}
+          <div className="dashboard-summary-grid">
+            {/* Today panel */}
+            <div className="summary-panel">
+              <div className="summary-panel-header">
+                <h2>Resumo de hoje</h2>
               </div>
 
-              {state.isClocked ? (
-                <button
-                  className="danger-button"
-                  onClick={handleClockOut}
-                  disabled={isClockActionLoading}
-                >
-                  {isClockActionLoading ? "A processar..." : "Registar Saída"}
-                </button>
+              <div className="stat-card" onClick={() => navigate(routes.team)}>
+                <div className="stat-icon"><Clock size={20} color="white" /></div>
+                <div className="stat-content">
+                  <div className="stat-label">Atualmente com ponto registado</div>
+                  <div className="stat-value">{activeCount}</div>
+                </div>
+              </div>
+
+              <div className="stat-card">
+                <div className="stat-icon"><Coffee size={20} color="white" /></div>
+                <div className="stat-content">
+                  <div className="stat-label">Folgas hoje</div>
+                  <div className="stat-value">{todayTimeOffs}</div>
+                </div>
+              </div>
+
+              <div className="stat-card">
+                <div className="stat-icon"><Timer size={20} color="white" /></div>
+                <div className="stat-content">
+                  <div className="stat-label">Tempo trabalhado hoje</div>
+                  <div className="stat-value" style={{ fontSize: 20 }}>{worked}</div>
+                </div>
+              </div>
+
+              <div className="stat-card" onClick={() => navigate(routes.notifications)}>
+                <div className="stat-icon"><ClipboardList size={20} color="white" /></div>
+                <div className="stat-content">
+                  <div className="stat-label">Pedidos pendentes</div>
+                  <div className="stat-value">{pendingCount}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Week panel */}
+            <div className="summary-panel">
+              <div className="summary-panel-header">
+                <h2>Resumo da semana</h2>
+                <div className="summary-week-nav">
+                  <button onClick={() => setWeekStart(addWeeks(weekStart, -1))}><ChevronLeft size={16} /></button>
+                  <span>{fmtWeek(weekStart)}</span>
+                  <button onClick={() => setWeekStart(addWeeks(weekStart, 1))}><ChevronRight size={16} /></button>
+                </div>
+              </div>
+
+              <div className="stat-card" onClick={() => navigate(routes.scheduler)}>
+                <div className="stat-icon"><CalendarDays size={20} color="white" /></div>
+                <div className="stat-content">
+                  <div className="stat-label">Total de turnos agendados</div>
+                  <div className="stat-value">{allWeekCount}</div>
+                </div>
+                <span className="stat-link" style={{ display: "flex", alignItems: "center", gap: 2 }}>Ver agenda <ChevronRight size={13} /></span>
+              </div>
+
+              <div className="stat-card" onClick={() => navigate(routes.notifications)}>
+                <div className="stat-icon"><User size={20} color="white" /></div>
+                <div className="stat-content">
+                  <div className="stat-label">Aguardando confirmação</div>
+                  <div className="stat-value">{pendingCount}</div>
+                </div>
+              </div>
+
+              <div className="stat-card">
+                <div className="stat-icon"><Unlock size={20} color="white" /></div>
+                <div className="stat-content">
+                  <div className="stat-label">Turnos em aberto</div>
+                  <div className="stat-value">0</div>
+                </div>
+              </div>
+
+              <div className="stat-card">
+                <div className="stat-icon"><AlertTriangle size={20} color="white" /></div>
+                <div className="stat-content">
+                  <div className="stat-label">Turnos inacabados</div>
+                  <div className="stat-value">0</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom panels */}
+          <div className="dashboard-bottom">
+            {/* My shifts */}
+            <div className="panel-card">
+              <div className="panel-card-header">
+                <h3>Os meus turnos</h3>
+                <button onClick={() => navigate(routes.scheduler)}>Ver agenda</button>
+              </div>
+              {publishedWeekShifts.length === 0 ? (
+                <p className="muted-text" style={{ textAlign: "center", padding: "16px 0" }}>
+                  Sem turnos publicados esta semana.
+                </p>
               ) : (
-                <button
-                  className="primary-button dashboard-primary"
-                  onClick={handleClockIn}
-                  disabled={isClockActionLoading}
-                >
-                  {isClockActionLoading ? "A processar..." : "Registar Entrada"}
-                </button>
-              )}
-            </section>
-
-            <section className="dashboard-grid">
-              <article
-                className="summary-card"
-                onClick={() => navigate(routes.team)}
-              >
-                <span>Em turno agora</span>
-                <strong>{state.activeEmployees.length}</strong>
-              </article>
-
-              <article
-                className="summary-card"
-                onClick={() => navigate(routes.scheduler)}
-              >
-                <span>Turno de hoje</span>
-                <strong>
-                  {todayShift
-                    ? `${resolvedStartTime(todayShift).slice(0, 5)} - ${resolvedEndTime(todayShift).slice(0, 5)}`
-                    : "—"}
-                </strong>
-              </article>
-
-              <article
-                className="summary-card"
-                onClick={() => navigate(routes.scheduler)}
-              >
-                <span>Turnos esta semana</span>
-                <strong>{state.allWeekShiftsCount}</strong>
-              </article>
-
-              <article
-                className="summary-card"
-                onClick={() => navigate(routes.notifications)}
-              >
-                <span>Pedidos pendentes</span>
-                <strong>
-                  {pendingRequestsCount > 0 ? pendingRequestsCount : "—"}
-                </strong>
-              </article>
-
-              <article className="summary-card">
-                <span>Total hoje</span>
-                <strong>{calculateTodayWorked(state.attendanceRecords)}</strong>
-              </article>
-            </section>
-
-            <section className="dashboard-content-grid">
-              <article className="panel-card">
-                <div className="panel-header">
-                  <h2>Os meus turnos</h2>
-                  <button onClick={() => navigate(routes.scheduler)}>
-                    Ver agenda
-                  </button>
-                </div>
-
-                {publishedWeekShifts.length === 0 ? (
-                  <p className="muted-text">
-                    Sem turnos publicados esta semana.
-                  </p>
-                ) : (
-                  <div className="shift-list">
-                    {publishedWeekShifts.slice(0, 5).map((shift) => (
+                <div className="shift-list">
+                  {publishedWeekShifts.slice(0, 5).map(shift => {
+                    const d = new Date(shift.date.slice(0, 10) + "T12:00");
+                    const isToday = shift.date.slice(0, 10) === today;
+                    return (
                       <div className="shift-row" key={shift.id}>
-                        <div className="shift-date">
-                          <strong>{new Date(shift.date).getDate()}</strong>
-                          <span>{formatDate(shift.date).slice(0, 3)}</span>
+                        <div className="shift-date-badge">
+                          <strong>{d.getDate()}</strong>
+                          <span>{fmtDate(shift.date).slice(0, 3)}</span>
                         </div>
-
-                        <div className="shift-info">
-                          <span>{shift.shiftType?.name ?? "Sem posição"}</span>
-                          <strong>
-                            {resolvedStartTime(shift).slice(0, 5)} -{" "}
-                            {resolvedEndTime(shift).slice(0, 5)}
-                          </strong>
+                        <div className="shift-row-info">
+                          <div className="shift-type">{shift.shiftType?.name ?? "Sem posição"}</div>
+                          <div className="shift-time">
+                            {resolvedStartTime(shift).slice(0, 5)} — {resolvedEndTime(shift).slice(0, 5)}
+                          </div>
                         </div>
-
-                        {shift.date.slice(0, 10) === today && (
-                          <span className="today-badge">Hoje</span>
-                        )}
+                        {isToday && <span className="today-tag">Hoje</span>}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </article>
-
-              <DashboardRequestActions
-                myShifts={state.shifts}
-                currentUserId={currentUserId}
-                weekStart={weekStart}
-                onRequestCreated={loadDashboard}
-              />
-
-              <article className="panel-card">
-                <div className="panel-header">
-                  <h2>Navegação</h2>
+                    );
+                  })}
                 </div>
+              )}
+            </div>
 
-                <div className="nav-grid">
-                  <button onClick={() => navigate(routes.profile)}>
-                    Perfil
-                  </button>
-
-                  <button onClick={() => navigate(routes.scheduler)}>
-                    Agenda
-                  </button>
-
-                  <button onClick={() => navigate(routes.inbox)}>Inbox</button>
-
-                  <button onClick={() => navigate(routes.notifications)}>
-                    Notificações
-                  </button>
-
-                  <button onClick={() => navigate(routes.attendanceHistory)}>
-                    Histórico
-                  </button>
-
-                  <button onClick={() => navigate(routes.availability)}>
-                    Disponibilidade
-                  </button>
-
-                  {canViewManagementScreens && (
-                    <>
-                      <button onClick={() => navigate(routes.team)}>
-                        Equipa
-                      </button>
-
-                      <button
-                        onClick={() => navigate(routes.attendanceMonitor)}
-                      >
-                        Monitorização
-                      </button>
-                      <button onClick={() => navigate(routes.weekAssignments)}>
-                        Atribuições
-                      </button>
-                    </>
-                  )}
+            {/* Sent requests */}
+            <div className="panel-card">
+              <div className="panel-card-header">
+                <h3>Pedidos enviados</h3>
+                <button onClick={() => navigate(routes.notifications)}>Ver todos</button>
+              </div>
+              {myTimeOffs.length === 0 && mySwaps.length === 0 ? (
+                <p className="muted-text" style={{ textAlign: "center", padding: "16px 0" }}>
+                  Sem pedidos enviados.
+                </p>
+              ) : (
+                <div className="request-list">
+                  {myTimeOffs.slice(0, 3).map(r => (
+                    <div className="request-row" key={`tor-${r.id}`}>
+                      <span className="request-type-pill ferias">Férias</span>
+                      <div className="request-row-info">
+                        <strong>{r.startDate.slice(0, 10)} — {r.endDate.slice(0, 10)}</strong>
+                        <span>{r.reason ?? "Sem motivo"}</span>
+                      </div>
+                      <span className={`status-badge ${r.status.toLowerCase()}`}>
+                        {statusLabel(r.status)}
+                      </span>
+                    </div>
+                  ))}
+                  {mySwaps.slice(0, 3).map(r => (
+                    <div className="request-row" key={`ssr-${r.id}`}>
+                      <span className="request-type-pill troca">Troca</span>
+                      <div className="request-row-info">
+                        <strong>Pedido de troca de turno</strong>
+                        <span>{r.requesterShift?.user?.name ?? "—"}</span>
+                      </div>
+                      <span className={`status-badge ${r.status.toLowerCase()}`}>
+                        {statusLabel(r.status)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              </article>
-            </section>
-          </>
-        )}
-      </section>
-    </main>
+              )}
+            </div>
+          </div>
+
+          {/* Clock-in card */}
+          <div className="panel-card">
+            <div className="panel-card-header">
+              <h3>Registo de ponto</h3>
+            </div>
+            {todayShift ? (
+              <p className="muted-text">
+                Turno de hoje: <strong style={{ color: "var(--text)" }}>
+                  {resolvedStartTime(todayShift).slice(0, 5)} — {resolvedEndTime(todayShift).slice(0, 5)}
+                </strong>
+                {" "}· Para registar ponto aceda ao ecrã de{" "}
+                <button
+                  style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 13 }}
+                  onClick={() => navigate(routes.checkIn)}
+                >
+                  Check-in
+                </button>.
+              </p>
+            ) : (
+              <p className="muted-text">
+                Sem turno agendado para hoje.{" "}
+                <button
+                  style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 13 }}
+                  onClick={() => navigate(routes.checkIn)}
+                >
+                  Registar ponto
+                </button>
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </>
   );
 }

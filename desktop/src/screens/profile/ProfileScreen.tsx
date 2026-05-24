@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { User as UserIcon, Calendar, Mail, Bell, LogOut, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { getMe, updateMe } from "../../api/userApi";
@@ -6,113 +7,84 @@ import type { User } from "../../models/user";
 import { routes } from "../../navigation/routes";
 import { tokenManager } from "../../storage/tokenManager";
 
-type ProfileSubScreen = "menu" | "update";
-
-function getInitials(name: string): string {
-  return name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("") || "?";
+function initials(name: string) {
+  return name.split(" ").filter(Boolean).slice(0, 2).map(p => p[0].toUpperCase()).join("") || "?";
 }
 
-function formatCategory(category: string): string {
-  switch (category) {
-    case "VETERINARIAN":
-      return "Veterinário";
-    case "NURSE":
-      return "Enfermeiro";
-    case "ADMINISTRATIVE":
-      return "Administrativo";
-    case "OPERATIONAL":
-      return "Operacional";
-    default:
-      return category;
-  }
+function catLabel(c: string) {
+  if (c === "VETERINARIAN")  return "Veterinario";
+  if (c === "NURSE")         return "Enfermeiro";
+  if (c === "ADMINISTRATIVE") return "Administrativo";
+  if (c === "OPERATIONAL")   return "Operacional";
+  return c;
 }
 
-function formatRole(role: string): string {
-  switch (role) {
-    case "ADMIN":
-      return "Administrador";
-    case "MANAGER":
-      return "Gerente";
-    case "EMPLOYEE":
-      return "Funcionário";
-    default:
-      return role;
-  }
+function roleLabel(r: string) {
+  if (r === "ADMIN")   return "Administrador";
+  if (r === "MANAGER") return "Gerente";
+  return "Funcionario";
 }
 
 export function ProfileScreen() {
   const navigate = useNavigate();
 
-  const [subScreen, setSubScreen] = useState<ProfileSubScreen>("menu");
-  const [user, setUser] = useState<User | null>(null);
+  const [user,    setUser]    = useState<User | null>(null);
+  const [subScreen, setSub]   = useState<"menu" | "edit">("menu");
 
-  const [name, setName] = useState("");
-  const [contact, setContact] = useState("");
+  // edit form
+  const [name,     setName]    = useState("");
+  const [contact,  setContact] = useState("");
   const [password, setPassword] = useState("");
 
-  const [emailNotifications, setEmailNotifications] = useState(true);
-  const [pushNotifications, setPushNotifications] = useState(true);
+  const [emailNotif, setEmailNotif] = useState(true);
+  const [pushNotif,  setPushNotif]  = useState(true);
 
   const [isLoading, setIsLoading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isSaving,  setIsSaving]  = useState(false);
+  const [error,     setError]     = useState<string | null>(null);
+  const [toast,     setToast]     = useState<string | null>(null);
 
-  const fallbackName = tokenManager.getUserName() ?? "Utilizador";
-  const displayName = user?.name ?? fallbackName;
+  const fallbackName  = tokenManager.getUserName() ?? "Utilizador";
+  const displayName   = user?.name ?? fallbackName;
+
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  }
 
   async function loadProfile() {
+    setIsLoading(true); setError(null);
     try {
-      setIsLoading(true);
-      setErrorMessage(null);
-      setSuccessMessage(null);
-
-      const currentUser = await getMe();
-
-      setUser(currentUser);
-      setName(currentUser.name);
-      setContact(currentUser.contact ?? "");
+      const u = await getMe();
+      setUser(u);
+      setName(u.name);
+      setContact(u.contact ?? "");
     } catch {
-      setErrorMessage("Erro ao carregar perfil");
+      setError("Erro ao carregar perfil");
     } finally {
       setIsLoading(false);
     }
   }
 
-  async function handleSave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (name.trim() === "") {
-      setErrorMessage("O nome não pode estar vazio");
-      return;
-    }
-
+  async function handleSave(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) { setError("O nome nao pode estar vazio"); return; }
+    setIsSaving(true); setError(null);
     try {
-      setIsSaving(true);
-      setErrorMessage(null);
-      setSuccessMessage(null);
-
-      const updatedUser = await updateMe({
-        name: name.trim(),
-        contact: contact.trim() === "" ? null : contact.trim(),
-        password: password.trim() === "" ? null : password
+      const updated = await updateMe({
+        name:     name.trim(),
+        contact:  contact.trim() || null,
+        password: password.trim() || null,
       });
-
-      setUser(updatedUser);
-      setName(updatedUser.name);
-      setContact(updatedUser.contact ?? "");
+      setUser(updated);
+      setName(updated.name);
+      setContact(updated.contact ?? "");
       setPassword("");
-
-      tokenManager.updateUserData(updatedUser.name, updatedUser.category);
-
-      setSuccessMessage("Perfil atualizado com sucesso");
+      tokenManager.updateUserData(updated.name, updated.category);
+      setSub("menu");
+      showToast("Perfil atualizado.");
     } catch {
-      setErrorMessage("Erro ao atualizar perfil");
+      setError("Erro ao atualizar perfil");
     } finally {
       setIsSaving(false);
     }
@@ -123,202 +95,167 @@ export function ProfileScreen() {
     navigate(routes.login, { replace: true });
   }
 
-  useEffect(() => {
-    void loadProfile();
-  }, []);
+  useEffect(() => { void loadProfile(); }, []);
 
-  useEffect(() => {
-    if (!successMessage) {
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      setSuccessMessage(null);
-    }, 3000);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [successMessage]);
-
-  if (subScreen === "update") {
+  if (subScreen === "edit") {
     return (
-      <main className="profile-page">
-        {successMessage && (
-          <div className="success-banner">
-            {successMessage}
+      <div style={{ maxWidth: 520 }}>
+        <div className="page-header">
+          <h1>Editar Perfil</h1>
+          <button className="btn btn-ghost btn-sm" onClick={() => { setSub("menu"); setError(null); }}>Cancelar</button>
+        </div>
+
+        {error && <div className="error-banner">{error}</div>}
+
+        <div className="panel-card">
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
+            <div className="user-avatar lg">{initials(name || displayName)}</div>
           </div>
-        )}
 
-        <section className="profile-shell">
-          <header className="profile-topbar">
-            <button
-              className="text-button"
-              onClick={() => {
-                setSubScreen("menu");
-                setErrorMessage(null);
-                setSuccessMessage(null);
-              }}
-            >
-              Cancelar
-            </button>
-
-            <strong>{name || "Perfil"}</strong>
-
-            <button
-              className="text-button"
-              form="profile-form"
-              type="submit"
-              disabled={isSaving || name.trim() === ""}
-            >
-              {isSaving ? "..." : "Guardar"}
-            </button>
-          </header>
-
-          <form id="profile-form" className="profile-form" onSubmit={handleSave}>
-            <div className="profile-avatar-wrapper">
-              <div className="profile-avatar large">
-                {getInitials(name || displayName)}
-              </div>
-              <div className="camera-dot">📷</div>
+          <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            <div className="form-group">
+              <label>Nome completo</label>
+              <input value={name} onChange={e => setName(e.target.value)} disabled={isSaving} placeholder="Nome completo" />
             </div>
-
-            {isLoading && (
-              <p className="muted-text center-text">A carregar perfil...</p>
-            )}
-
-            <section className="profile-form-card">
-              <label>
-                <span>Nome completo</span>
-                <input
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  disabled={isSaving}
-                  placeholder="Nome completo"
-                />
-              </label>
-
-              <label>
-                <span>Contacto</span>
-                <input
-                  value={contact}
-                  onChange={(event) => setContact(event.target.value)}
-                  disabled={isSaving}
-                  placeholder="Contacto"
-                />
-              </label>
-
-              <label>
-                <span>Categoria</span>
-                <input
-                  value={user ? formatCategory(user.category) : ""}
-                  disabled
-                  placeholder="Categoria"
-                />
-              </label>
-
-              <label>
-                <span>Nova password</span>
-                <input
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  disabled={isSaving}
-                  placeholder="Nova password (opcional)"
-                  type="password"
-                />
-              </label>
-            </section>
-
-            {errorMessage && (
-              <div className="profile-error">
-                {errorMessage}
-              </div>
-            )}
+            <div className="form-group">
+              <label>Contacto</label>
+              <input value={contact} onChange={e => setContact(e.target.value)} disabled={isSaving} placeholder="Contacto (opcional)" />
+            </div>
+            <div className="form-group">
+              <label>Categoria</label>
+              <input value={user ? catLabel(user.category) : ""} disabled />
+            </div>
+            <div className="form-group">
+              <label>Nova password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                disabled={isSaving}
+                placeholder="Deixar em branco para manter"
+              />
+            </div>
+            <div className="form-actions">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSub("menu"); setError(null); }}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn btn-primary btn-sm" disabled={isSaving || !name.trim()}>
+                {isSaving ? "A guardar..." : "Guardar"}
+              </button>
+            </div>
           </form>
-        </section>
-      </main>
+        </div>
+      </div>
     );
   }
 
   return (
-    <main className="profile-page">
-      <section className="profile-shell">
-        <header className="profile-back-header">
-          <button className="secondary-button" onClick={() => navigate(routes.dashboard)}>
-            Voltar
-          </button>
-        </header>
+    <div style={{ maxWidth: 520 }}>
+      <div className="page-header">
+        <h1>Perfil</h1>
+      </div>
 
-        <section className="profile-identity">
-          <div className="profile-avatar">
-            {getInitials(displayName)}
+      {isLoading ? (
+        <div className="loading-state">A carregar...</div>
+      ) : (
+        <>
+          {/* Identity card */}
+          <div className="panel-card" style={{ marginBottom: 20, display: "flex", alignItems: "center", gap: 20 }}>
+            <div className="user-avatar lg">{initials(displayName)}</div>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>{displayName}</div>
+              {user && (
+                <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 3 }}>
+                  {roleLabel(user.role)} · {catLabel(user.category)}
+                </div>
+              )}
+              {user?.employeeNumber && (
+                <div style={{ fontSize: 12, color: "var(--text-faint)", marginTop: 2 }}>{user.employeeNumber}</div>
+              )}
+            </div>
           </div>
 
-          <h1>{displayName}</h1>
-
+          {/* Info card */}
           {user && (
-            <p>
-              {formatRole(user.role)} · {formatCategory(user.category)}
-            </p>
+            <div className="detail-info-list" style={{ marginBottom: 20 }}>
+              <div className="detail-info-row"><span>Email</span><strong>{user.email}</strong></div>
+              <div className="detail-info-row"><span>Contacto</span><strong>{user.contact ?? "—"}</strong></div>
+              <div className="detail-info-row"><span>Numero</span><strong>{user.employeeNumber}</strong></div>
+              <div className="detail-info-row"><span>Role</span><strong>{roleLabel(user.role)}</strong></div>
+              <div className="detail-info-row"><span>Categoria</span><strong>{catLabel(user.category)}</strong></div>
+            </div>
           )}
-        </section>
 
-        {errorMessage && (
-          <div className="profile-error">
-            {errorMessage}
+          {/* Actions */}
+          <div className="panel-card" style={{ marginBottom: 20, display: "flex", flexDirection: "column", gap: 2, padding: "8px 0" }}>
+            <button
+              className="sidebar-item"
+              onClick={() => setSub("edit")}
+              style={{ padding: "12px 20px" }}
+            >
+              <UserIcon size={16} className="sidebar-item-icon" />
+              <span>Atualizar Perfil</span>
+              <ChevronRight size={15} style={{ marginLeft: "auto", color: "var(--text-faint)" }} />
+            </button>
+            <button
+              className="sidebar-item"
+              onClick={() => navigate(routes.availability)}
+              style={{ padding: "12px 20px" }}
+            >
+              <Calendar size={16} className="sidebar-item-icon" />
+              <span>A Minha Disponibilidade</span>
+              <ChevronRight size={15} style={{ marginLeft: "auto", color: "var(--text-faint)" }} />
+            </button>
           </div>
-        )}
 
-        <section className="profile-menu-card">
-          <button className="profile-menu-row" onClick={() => setSubScreen("update")}>
-            <span className="menu-icon">👤</span>
-            <span>Atualizar Perfil</span>
-            <strong>›</strong>
-          </button>
+          {/* Preferences */}
+          <div className="panel-card" style={{ marginBottom: 20, padding: 0 }}>
+            <div style={{ padding: "10px 20px 6px", borderBottom: "1px solid var(--border)" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.6px" }}>
+                Preferencias
+              </span>
+            </div>
+            <label className="sidebar-item" style={{ padding: "12px 20px", cursor: "pointer" }}>
+              <Mail size={16} className="sidebar-item-icon" />
+              <span>Notificacoes por Email</span>
+              <input
+                type="checkbox"
+                checked={emailNotif}
+                onChange={e => setEmailNotif(e.target.checked)}
+                style={{ marginLeft: "auto", width: 16, height: 16, accentColor: "var(--accent)" }}
+              />
+            </label>
+            <label className="sidebar-item" style={{ padding: "12px 20px", cursor: "pointer" }}>
+              <Bell size={16} className="sidebar-item-icon" />
+              <span>Notificacoes Push</span>
+              <input
+                type="checkbox"
+                checked={pushNotif}
+                onChange={e => setPushNotif(e.target.checked)}
+                style={{ marginLeft: "auto", width: 16, height: 16, accentColor: "var(--accent)" }}
+              />
+            </label>
+          </div>
 
-          <button
-            className="profile-menu-row"
-            onClick={() => navigate(routes.availability)}
-          >
-            <span className="menu-icon">📅</span>
-            <span>A Minha Disponibilidade</span>
-            <strong>›</strong>
-          </button>
-        </section>
+          {/* Logout */}
+          <div className="panel-card" style={{ padding: 0 }}>
+            <button
+              className="sidebar-item"
+              onClick={handleLogout}
+              style={{ padding: "12px 20px", color: "var(--red)", width: "100%" }}
+            >
+              <LogOut size={16} className="sidebar-item-icon" />
+              <span>Terminar Sessao</span>
+            </button>
+          </div>
+        </>
+      )}
 
-        <h2 className="profile-section-title">Preferências</h2>
-
-        <section className="profile-menu-card">
-          <label className="profile-menu-row toggle-row">
-            <span className="menu-icon">✉️</span>
-            <span>Notificações por Email</span>
-
-            <input
-              type="checkbox"
-              checked={emailNotifications}
-              onChange={(event) => setEmailNotifications(event.target.checked)}
-            />
-          </label>
-
-          <label className="profile-menu-row toggle-row">
-            <span className="menu-icon">🔔</span>
-            <span>Notificações Push</span>
-
-            <input
-              type="checkbox"
-              checked={pushNotifications}
-              onChange={(event) => setPushNotifications(event.target.checked)}
-            />
-          </label>
-        </section>
-
-        <section className="profile-menu-card danger-section">
-          <button className="profile-menu-row logout-row" onClick={handleLogout}>
-            <span className="menu-icon danger-icon">↪</span>
-            <span>Terminar Sessão</span>
-          </button>
-        </section>
-      </section>
-    </main>
+      {toast && (
+        <div className="toast-container">
+          <div className="toast">✓ {toast}</div>
+        </div>
+      )}
+    </div>
   );
 }

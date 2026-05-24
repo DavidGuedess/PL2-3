@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -322,11 +323,11 @@ export function AvailabilityScreen() {
 
         <section className="availability-calendar-card">
           <div className="availability-month-header">
-            <button onClick={previousMonth}>‹</button>
+            <button onClick={previousMonth}><ChevronLeft size={16} /></button>
 
             <strong>{formatMonth(displayMonth)}</strong>
 
-            <button onClick={nextMonth}>›</button>
+            <button onClick={nextMonth}><ChevronRight size={16} /></button>
           </div>
 
           <div className="availability-weekdays">
