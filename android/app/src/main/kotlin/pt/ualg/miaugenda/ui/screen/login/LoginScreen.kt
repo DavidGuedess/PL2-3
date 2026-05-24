@@ -22,6 +22,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import pt.ualg.miaugenda.MiauGendaApp
+import pt.ualg.miaugenda.data.notif.schedulePollingForRequests
 
 @Composable
 fun LoginScreen(
@@ -29,16 +30,17 @@ fun LoginScreen(
 ) {
     val context = LocalContext.current
     val tokenManager = remember { MiauGendaApp.getTokenManager(context) }
-    
+
     val viewModel: LoginViewModel = viewModel(
         factory = LoginViewModelFactory(tokenManager)
     )
-    
+
     val uiState by viewModel.uiState.collectAsState()
     val focusManager = LocalFocusManager.current
-    
+
     LaunchedEffect(uiState.isLoginSuccessful) {
         if (uiState.isLoginSuccessful) {
+            schedulePollingForRequests(context.applicationContext)
             onLoginSuccess()
         }
     }
