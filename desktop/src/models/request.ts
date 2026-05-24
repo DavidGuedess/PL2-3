@@ -10,6 +10,7 @@ export interface TimeOffRequest {
   status: string;
   allDay: boolean;
   createdAt: string;
+  updatedAt: string;
   approvedByName?: string | null;
   user?: User | null;
 }
@@ -23,6 +24,7 @@ export interface ShiftSwapRequest {
   status: string;
   targetAccepted: boolean | null;
   createdAt: string;
+  updatedAt: string;
   approvedByName?: string | null;
   requester?: User | null;
   requesterShift?: Shift | null;

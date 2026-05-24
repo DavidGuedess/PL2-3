@@ -7,8 +7,8 @@ import type {
   UpdateRequestStatusBody
 } from "../models/request";
 
-export async function getTimeOffRequests(): Promise<TimeOffRequest[]> {
-  const response = await apiClient.get<TimeOffRequest[]>("/time-off-requests");
+export async function getTimeOffRequests(params?: { userId?: number; from?: string; to?: string }): Promise<TimeOffRequest[]> {
+  const response = await apiClient.get<TimeOffRequest[]>("/time-off-requests", { params });
   return response.data;
 }
 
@@ -31,8 +31,8 @@ export async function updateTimeOffRequestStatus(
   return response.data;
 }
 
-export async function getShiftSwapRequests(): Promise<ShiftSwapRequest[]> {
-  const response = await apiClient.get<ShiftSwapRequest[]>("/shift-swap-requests");
+export async function getShiftSwapRequests(params?: { userId?: number; from?: string; to?: string }): Promise<ShiftSwapRequest[]> {
+  const response = await apiClient.get<ShiftSwapRequest[]>("/shift-swap-requests", { params });
   return response.data;
 }
 

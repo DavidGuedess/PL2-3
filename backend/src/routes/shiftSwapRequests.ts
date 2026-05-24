@@ -23,14 +23,31 @@ const shiftInclude = {
 
 // GET /shift-swap-requests
 // EMPLOYEE: own (as requester) + requests targeting their shifts
-// ADMIN/MANAGER: all
+// ADMIN/MANAGER: all (with optional ?userId, ?from, ?to filters)
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId, role } = req.user!
+    const isManager = role === 'ADMIN' || role === 'MANAGER'
 
-    const where = (role === 'ADMIN' || role === 'MANAGER')
+    let where: any = isManager
       ? {}
       : { OR: [{ requesterId: userId }, { targetShift: { userId } }] }
+
+    if (isManager && req.query.userId) {
+      const filterUserId = parseInt(req.query.userId as string)
+      where = { OR: [{ requesterId: filterUserId }, { targetShift: { userId: filterUserId } }] }
+    }
+
+    if (req.query.from || req.query.to) {
+      const dateFilter: any = {}
+      if (req.query.from) dateFilter.gte = new Date(req.query.from as string)
+      if (req.query.to) {
+        const toDate = new Date(req.query.to as string)
+        toDate.setUTCHours(23, 59, 59, 999)
+        dateFilter.lte = toDate
+      }
+      where.createdAt = dateFilter
+    }
 
     const requests = await prisma.shiftSwapRequest.findMany({
       where,
