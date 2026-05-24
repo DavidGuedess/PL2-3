@@ -1,4 +1,5 @@
 import express from 'express'
+import { runAutoClockOut } from './controllers/attendanceController'
 import usersRoutes from './routes/users'
 import authRoutes from './routes/auth'
 import shiftTypesRoutes from './routes/shiftTypes'
@@ -31,5 +32,8 @@ app.use('/shift-swap-requests', shiftSwapRequestsRoutes)
 app.use('/availability', availabilityRoutes)
 
 app.use(errorHandler)
+
+// Verifica saídas automáticas de minuto a minuto
+setInterval(runAutoClockOut, 60_000)
 
 export default app

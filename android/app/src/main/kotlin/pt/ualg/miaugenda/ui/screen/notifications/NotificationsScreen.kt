@@ -31,7 +31,10 @@ import kotlinx.coroutines.launch
 import pt.ualg.miaugenda.data.model.TimeOffRequest
 import pt.ualg.miaugenda.data.model.ShiftSwapRequest
 import pt.ualg.miaugenda.data.remote.RetrofitClient
+import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
@@ -65,7 +68,10 @@ private data class NotifItem(
     val requestCategory: String = "",
     val isRead: Boolean = false,
     // true quando o utilizador atual é o target do swap e ainda não respondeu
-    val isTargetResponse: Boolean = false
+    val isTargetResponse: Boolean = false,
+    val createdAt: String = "",
+    // true quando é o próprio utilizador que fez o pedido (não pode aprovar/rejeitar)
+    val isOwnRequest: Boolean = false
 )
 
 private val dateFmtShort = DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale("pt", "PT"))
@@ -90,7 +96,8 @@ private fun torToNotifItem(req: TimeOffRequest): NotifItem {
             else       -> NotifStatus.PENDENTE
         },
         approvedByName  = req.approvedByName,
-        requestCategory = "timeOff"
+        requestCategory = "timeOff",
+        createdAt       = req.createdAt
     )
 }
 
@@ -117,7 +124,8 @@ private fun ssrToNotifItem(req: ShiftSwapRequest, currentUserId: Int): NotifItem
         status          = status,
         approvedByName  = req.approvedByName,
         requestCategory = "swap",
-        isTargetResponse = isTargetResponse
+        isTargetResponse = isTargetResponse,
+        createdAt       = req.createdAt
     )
 }
 
@@ -146,21 +154,37 @@ fun NotificationsScreen(
         scope.launch {
             try {
                 val rawSwaps = RetrofitClient.requestApi.getShiftSwapRequests().body().orEmpty()
+                val rawTor   = RetrofitClient.requestApi.getTimeOffRequests().body().orEmpty()
 
-                val filteredSwaps = if (isManager) {
+                val swapItems: List<NotifItem>
+                val torItems: List<NotifItem>
+
+                if (isManager) {
                     // gestor vê pedidos onde o target já aceitou (aguarda aprovação) ou já processados
-                    rawSwaps.filter { it.targetAccepted == true || it.status != "PENDING" }
+                    // mas marca os seus próprios pedidos como isOwnRequest (não pode aprovar os seus)
+                    swapItems = rawSwaps
+                        .filter { it.targetAccepted == true || it.status != "PENDING" }
+                        .map { ssr ->
+                            val item = ssrToNotifItem(ssr, currentUserId)
+                            if (ssr.requesterId == currentUserId) item.copy(isOwnRequest = true) else item
+                        }
+                    torItems = rawTor.map { tor ->
+                        val item = torToNotifItem(tor)
+                        if (tor.userId == currentUserId) item.copy(isOwnRequest = true) else item
+                    }
                 } else {
-                    // funcionário vê apenas pedidos onde é o target e ainda não respondeu
-                    rawSwaps.filter { it.targetShift?.user?.id == currentUserId && it.targetAccepted == null }
-                }
-
-                val swapItems = filteredSwaps.map { ssrToNotifItem(it, currentUserId) }
-
-                val torItems = if (isManager) {
-                    RetrofitClient.requestApi.getTimeOffRequests().body().orEmpty().map { torToNotifItem(it) }
-                } else {
-                    emptyList()
+                    // pedidos onde o funcionário é target e ainda não respondeu (aceitar/recusar troca)
+                    val targetSwaps = rawSwaps
+                        .filter { it.targetShift?.user?.id == currentUserId && it.targetAccepted == null }
+                        .map { ssrToNotifItem(it, currentUserId) }
+                    // pedidos próprios do funcionário (ver estado)
+                    val ownSwaps = rawSwaps
+                        .filter { it.requesterId == currentUserId }
+                        .map { ssrToNotifItem(it, currentUserId).copy(isOwnRequest = true) }
+                    swapItems = (targetSwaps + ownSwaps).distinctBy { it.id }
+                    torItems = rawTor
+                        .filter { it.userId == currentUserId }
+                        .map { torToNotifItem(it).copy(isOwnRequest = true) }
                 }
 
                 notifications = (torItems + swapItems).sortedByDescending { it.id }
@@ -330,6 +354,17 @@ fun NotificationsScreen(
     }
 }
 
+private val dateFmtGroupHeader = DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale("pt", "PT"))
+
+private fun createdLocalDate(createdAt: String): LocalDate? = runCatching {
+    Instant.parse(createdAt).atZone(ZoneId.systemDefault()).toLocalDate()
+}.getOrNull() ?: runCatching { LocalDate.parse(createdAt.take(10)) }.getOrNull()
+
+private fun createdTimeStr(createdAt: String): String = runCatching {
+    LocalDateTime.ofInstant(Instant.parse(createdAt), ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("HH:mm"))
+}.getOrDefault("")
+
 // ── Lista ─────────────────────────────────────────────────────────────────────
 @Composable
 private fun NotificationsList(
@@ -341,28 +376,44 @@ private fun NotificationsList(
     onAccept: (NotifItem) -> Unit,
     onRefuse: (NotifItem) -> Unit
 ) {
+    val pendingCount = notifications.count { it.status == NotifStatus.PENDENTE }
+
+    // Agrupa por data de criação (mais recente primeiro)
+    val grouped = notifications
+        .groupBy { createdLocalDate(it.createdAt) ?: LocalDate.MIN }
+        .entries
+        .sortedByDescending { it.key }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 16.dp)
     ) {
         item {
-            Text(
-                "Notificações",
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 14.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Notificações",
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                if (pendingCount > 0) {
+                    Text(
+                        "Ler tudo ($pendingCount)",
+                        color = Blue,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
-        item {
-            Text(
-                if (isManager) "Todos os pedidos" else "Pedidos de troca para si",
-                color = TxtGray,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
-            )
-        }
+
         if (notifications.isEmpty()) {
             item {
                 Box(
@@ -373,16 +424,32 @@ private fun NotificationsList(
                 }
             }
         }
-        items(notifications) { notif ->
-            NotifCard(
-                item = notif,
-                onViewDetails = { onViewDetails(notif) },
-                onApprove = { onApprove(notif) },
-                onReject  = { onReject(notif) },
-                onAccept  = { onAccept(notif) },
-                onRefuse  = { onRefuse(notif) }
-            )
-            Spacer(Modifier.height(8.dp))
+
+        grouped.forEach { (date, group) ->
+            item {
+                val dateLabel = runCatching {
+                    date.format(dateFmtGroupHeader)
+                        .replaceFirstChar { it.uppercaseChar() }
+                }.getOrDefault(date.toString())
+                Text(
+                    dateLabel,
+                    color = TxtGray,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                )
+            }
+            items(group) { notif ->
+                NotifCard(
+                    item = notif,
+                    onViewDetails = { onViewDetails(notif) },
+                    onApprove = { onApprove(notif) },
+                    onReject  = { onReject(notif) },
+                    onAccept  = { onAccept(notif) },
+                    onRefuse  = { onRefuse(notif) }
+                )
+                Spacer(Modifier.height(8.dp))
+            }
         }
     }
 }
@@ -397,8 +464,25 @@ private fun NotifCard(
     onAccept: () -> Unit,
     onRefuse: () -> Unit
 ) {
-    val typeLabel = if (item.type == NotifType.PEDIDO_DE_TROCA) "PEDIDO DE TROCA" else "PEDIDO DE FOLGA"
-    val typeColor = if (item.type == NotifType.PEDIDO_DE_TROCA) Color(0xFF9B59B6) else Blue
+    val isProcessed = item.status != NotifStatus.PENDENTE
+
+    val typeLabel = when {
+        item.status == NotifStatus.REJEITADO && item.type == NotifType.PEDIDO_DE_TROCA -> "TROCA REJEITADA"
+        item.status == NotifStatus.REJEITADO                                            -> "FOLGA REJEITADA"
+        item.status == NotifStatus.APROVADO  && item.type == NotifType.PEDIDO_DE_TROCA -> "TROCA APROVADA"
+        item.status == NotifStatus.APROVADO                                             -> "FOLGA APROVADA"
+        item.type   == NotifType.PEDIDO_DE_TROCA                                       -> "PEDIDO DE TROCA"
+        else                                                                            -> "PEDIDO DE FOLGA"
+    }
+    val typeLabelColor = when (item.status) {
+        NotifStatus.APROVADO  -> DkGreen
+        NotifStatus.REJEITADO -> Orange
+        else -> if (item.type == NotifType.PEDIDO_DE_TROCA) Color(0xFF9B59B6) else Blue
+    }
+
+    val timeStr = createdTimeStr(item.createdAt)
+
+    val dividerColor = Color(0xFF2C2C2E)
 
     Column(
         modifier = Modifier
@@ -406,137 +490,108 @@ private fun NotifCard(
             .padding(horizontal = 12.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(DkSurface)
-            .alpha(if (item.isRead) 0.45f else 1f)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .alpha(if (isProcessed) 0.55f else 1f)
     ) {
-        when (item.status) {
-            NotifStatus.PENDENTE -> {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(typeColor.copy(alpha = 0.18f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(typeLabel, color = typeColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-                Text(item.shiftDateLabel, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text(item.duration, color = TxtGray, fontSize = 13.sp)
-                if (item.description.isNotEmpty()) {
-                    Text(item.description, color = TxtGray, fontSize = 13.sp)
-                }
-                Text("Funcionário: ${item.employeeName}", color = TxtGray, fontSize = 13.sp)
+        // ── Cabeçalho: tipo + hora ────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                typeLabel,
+                color = typeLabelColor,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
+            )
+            Text(timeStr, color = TxtGray, fontSize = 12.sp)
+        }
 
-                if (item.isTargetResponse) {
-                    // Botões para o target do swap: Aceitar / Recusar
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onViewDetails,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                            border = BorderStroke(1.dp, Color(0xFF444444)),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-                        ) { Text("Ver detalhes", fontSize = 11.sp) }
-                        Button(
-                            onClick = onRefuse,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = RedBadge.copy(alpha = 0.15f),
-                                contentColor = RedBadge
-                            ),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-                        ) { Text("Recusar", fontSize = 11.sp) }
-                        Button(
-                            onClick = onAccept,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = DkGreen.copy(alpha = 0.15f),
-                                contentColor = DkGreen
-                            ),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-                        ) { Text("Aceitar", fontSize = 11.sp) }
-                    }
-                } else {
-                    // Botões para gestor: Rejeitar / Aprovar
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onViewDetails,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                            border = BorderStroke(1.dp, Color(0xFF444444)),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-                        ) { Text("Ver detalhes", fontSize = 11.sp) }
-                        Button(
-                            onClick = onReject,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = RedBadge.copy(alpha = 0.15f),
-                                contentColor = RedBadge
-                            ),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-                        ) { Text("Rejeitar", fontSize = 11.sp) }
-                        Button(
-                            onClick = onApprove,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Blue.copy(alpha = 0.15f),
-                                contentColor = Blue
-                            ),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-                        ) { Text("Aprovar", fontSize = 11.sp) }
-                    }
-                }
+        // ── Corpo ─────────────────────────────────────────────────────────────
+        Column(modifier = Modifier.padding(horizontal = 14.dp)) {
+            Text(
+                item.shiftDateLabel,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            if (item.schedule.isNotBlank()) {
+                Text(item.schedule, color = TxtGray, fontSize = 14.sp)
             }
+            if (item.description.isNotBlank()) {
+                Text(item.description, color = TxtGray, fontSize = 13.sp)
+            }
+            if (item.employeeName.isNotBlank()) {
+                Text("Funcionário: ${item.employeeName}", color = TxtGray, fontSize = 13.sp)
+            }
+            if (isProcessed && !item.approvedByName.isNullOrBlank()) {
+                val actionLabel = if (item.status == NotifStatus.REJEITADO) "Rejeitado por:" else "Aprovado por:"
+                Text(
+                    "$actionLabel ${item.approvedByName}",
+                    color = TxtGray.copy(alpha = 0.55f),
+                    fontSize = 12.sp
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+        }
 
-            NotifStatus.APROVADO, NotifStatus.REJEITADO -> {
-                val isRejected = item.status == NotifStatus.REJEITADO
-                val actionMsg = when {
-                    isRejected && item.type == NotifType.PEDIDO_DE_TROCA -> "Recusou/rejeitou este pedido de troca."
-                    isRejected                                             -> "Rejeitou este pedido de folga."
-                    item.type  == NotifType.PEDIDO_DE_TROCA               -> "Aprovou este pedido de troca."
-                    else                                                   -> "Aprovou este pedido de folga."
-                }
-                val pillLabel = when {
-                    isRejected && item.type == NotifType.PEDIDO_DE_TROCA -> "TROCA REJEITADA"
-                    isRejected                                             -> "PEDIDO REJEITADO"
-                    item.type  == NotifType.PEDIDO_DE_TROCA               -> "TROCA APROVADA"
-                    else                                                   -> "PEDIDO DE FOLGA APROVADO"
-                }
-                val pillColor = if (isRejected) RedBadge.copy(alpha = 0.8f) else DkGreen
-                val byLabel   = if (isRejected) "Rejeitado por:" else "Aprovado por:"
+        // ── Botões flat com divisores ─────────────────────────────────────────
+        HorizontalDivider(color = dividerColor)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onViewDetails() }
+                .padding(vertical = 14.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Ver detalhes", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        }
 
-                Text(actionMsg, color = TxtGray, fontSize = 14.sp)
+        if (!isProcessed) {
+            if (item.isTargetResponse) {
+                HorizontalDivider(color = dividerColor)
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(pillColor.copy(alpha = 0.15f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .fillMaxWidth()
+                        .clickable { onRefuse() }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(pillLabel, color = pillColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Recusar", color = RedBadge, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
-                if (!item.approvedByName.isNullOrBlank()) {
-                    Text("$byLabel ${item.approvedByName}", color = TxtGray, fontSize = 13.sp)
-                }
-                OutlinedButton(
-                    onClick = onViewDetails,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                    border = BorderStroke(1.dp, Color(0xFF444444))
+                HorizontalDivider(color = dividerColor)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onAccept() }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Ver detalhes", fontSize = 12.sp)
+                    Text("Aceitar", color = DkGreen, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+            } else if (!item.isOwnRequest) {
+                HorizontalDivider(color = dividerColor)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onReject() }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Rejeitar", color = RedBadge, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+                HorizontalDivider(color = dividerColor)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onApprove() }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Aprovar", color = Blue, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }

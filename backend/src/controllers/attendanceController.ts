@@ -1,8 +1,110 @@
 import { Request, Response, NextFunction } from 'express'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, AttendanceType } from '@prisma/client'
 import { calculateAttendanceStats } from '../utils/attendanceStats'
 
 const prisma = new PrismaClient()
+
+// ── Funcionários atualmente em turno ──────────────────────────────────────────
+export const getActiveAttendance = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+
+    // Todos os registos de ponto de hoje
+    const records = await prisma.attendanceRecord.findMany({
+      where: { timestamp: { gte: today, lt: tomorrow } },
+      orderBy: { timestamp: 'asc' },
+      include: { user: { select: { id: true, name: true, employeeNumber: true } } }
+    })
+
+    // Para cada utilizador, guardar o último registo do dia
+    const lastByUser = new Map<number, typeof records[0]>()
+    for (const r of records) lastByUser.set(r.userId, r)
+
+    // Utilizadores cujo último registo é IN (estão atualmente em turno)
+    const activeRecords = Array.from(lastByUser.values()).filter(r => r.type === 'IN')
+    const activeIds = activeRecords.map(r => r.userId)
+
+    // Turno publicado de hoje para cada utilizador ativo
+    const shifts = activeIds.length > 0
+      ? await prisma.shift.findMany({
+          where: { userId: { in: activeIds }, date: { gte: today, lt: tomorrow }, published: true },
+          include: { shiftType: true }
+        })
+      : []
+
+    const shiftByUser = new Map(shifts.map(s => [s.userId, s]))
+
+    const result = activeRecords.map(rec => {
+      const shift = shiftByUser.get(rec.userId)
+      return {
+        userId: rec.userId,
+        name: rec.user.name,
+        employeeNumber: rec.user.employeeNumber,
+        clockedInSince: rec.timestamp.toISOString(),
+        shiftStart: shift?.startTime ?? shift?.shiftType?.startTime ?? null,
+        shiftEnd:   shift?.endTime   ?? shift?.shiftType?.endTime   ?? null
+      }
+    })
+
+    return res.json(result)
+  } catch (err) {
+    next(err)
+  }
+}
+
+// ── Saída automática 15 min após fim do turno ─────────────────────────────────
+export async function runAutoClockOut() {
+  try {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+
+    const now = new Date()
+    const nowMin = now.getHours() * 60 + now.getMinutes()
+
+    const records = await prisma.attendanceRecord.findMany({
+      where: { timestamp: { gte: today, lt: tomorrow } },
+      orderBy: { timestamp: 'asc' }
+    })
+
+    const lastByUser = new Map<number, { userId: number; type: string }>()
+    for (const r of records) lastByUser.set(r.userId, r)
+
+    const activeIds = Array.from(lastByUser.values())
+      .filter(r => r.type === 'IN')
+      .map(r => r.userId)
+
+    if (activeIds.length === 0) return
+
+    const shifts = await prisma.shift.findMany({
+      where: { userId: { in: activeIds }, date: { gte: today, lt: tomorrow }, published: true },
+      include: { shiftType: true }
+    })
+
+    for (const shift of shifts) {
+      const endStr = shift.endTime ?? shift.shiftType?.endTime
+      if (!endStr) continue
+
+      const parts = endStr.split(':').map(Number)
+      if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) continue
+
+      const endMin = parts[0] * 60 + parts[1] + 15
+
+      if (nowMin >= endMin) {
+        await prisma.attendanceRecord.create({
+          data: { userId: shift.userId, type: AttendanceType.OUT, note: 'Saída automática (turno encerrado)' }
+        })
+        console.log(`[autoClockOut] Saída automática para userId=${shift.userId}`)
+      }
+    }
+  } catch (e) {
+    console.error('[autoClockOut] Erro:', e)
+  }
+}
 
 export const getAttendanceReport = async (req: Request, res: Response, next: NextFunction) => {
   try {

@@ -53,6 +53,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import pt.ualg.miaugenda.MiauGendaApp
+import pt.ualg.miaugenda.data.model.ActiveEmployee
 import pt.ualg.miaugenda.data.model.AttendanceRecord
 import pt.ualg.miaugenda.data.model.Availability
 import pt.ualg.miaugenda.data.model.CreateAvailabilityBody
@@ -96,8 +97,7 @@ data class AvailabilityPref(
 
 // ── Sub-ecrãs internos ────────────────────────────────────────────────────────
 private enum class SubScreen {
-    Home, TurnosAgendados,
-    EmPausa, EmTurno, FolhasPonto,
+    Home, TurnosAgendados, EmTurno,
     PedidoFerias, PedidoTroca, ShiftSummary
 }
 
@@ -123,6 +123,7 @@ fun DashboardScreen(
     val uiState      by viewModel.uiState.collectAsState()
     val fullName     = tokenManager.getUserName() ?: "Xavier"
     val firstName    = fullName.split(" ").first()
+    val currentUserId = tokenManager.getUserId()
 
     val today      = LocalDate.now()
     val weekStart  = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
@@ -131,8 +132,7 @@ fun DashboardScreen(
         viewModel.loadMyRequests()
     }
 
-    var subScreen        by remember { mutableStateOf(SubScreen.Home) }
-    var showApproveDialog by remember { mutableStateOf(false) }
+    var subScreen by remember { mutableStateOf(SubScreen.Home) }
 
     BackHandler(enabled = subScreen != SubScreen.Home) { subScreen = SubScreen.Home }
 
@@ -147,15 +147,16 @@ fun DashboardScreen(
                 firstName             = firstName,
                 shifts                = uiState.shifts,
                 attendanceRecords     = uiState.attendanceRecords,
+                activeEmployees       = uiState.activeEmployees,
+                allWeekShiftsCount    = uiState.allWeekShiftsCount,
                 today                 = today,
                 isClocked             = uiState.isClocked,
                 clockedInSince        = uiState.clockedInSince,
-                timeOffRequests       = uiState.timeOffRequests,
-                shiftSwapRequests     = uiState.shiftSwapRequests,
+                timeOffRequests       = uiState.timeOffRequests.filter { it.userId == currentUserId },
+                shiftSwapRequests     = uiState.shiftSwapRequests.filter { it.requesterId == currentUserId },
                 onNavigate            = { subScreen = it },
                 onLogout              = { tokenManager.clearTokens(); onLogout() },
                 onProfileClick        = onProfileClick,
-                onApprove             = { showApproveDialog = true },
                 onClockIn             = { viewModel.clockIn {} },
                 onClockOut            = { subScreen = SubScreen.ShiftSummary },
                 onSchedulerClick      = onSchedulerClick,
@@ -164,23 +165,24 @@ fun DashboardScreen(
                 onEquipaClick         = onEquipaClick,
                 onAvailabilityClick   = onAvailabilityClick
             )
-            SubScreen.TurnosAgendados    -> ScreenTurnosAgendados(
+            SubScreen.TurnosAgendados -> ScreenTurnosAgendados(
                 shifts   = uiState.shifts.filter { it.published },
                 userName = fullName,
                 onBack   = { subScreen = SubScreen.Home }
             )
-            SubScreen.EmPausa            -> ScreenEmPausa(onBack = { subScreen = SubScreen.Home })
-            SubScreen.EmTurno            -> ScreenEmTurno(onBack = { subScreen = SubScreen.Home })
-            SubScreen.FolhasPonto        -> ScreenFolhasPonto(onBack = { subScreen = SubScreen.Home }, onSchedulerClick = onSchedulerClick, onNotificationsClick = onNotificationsClick, onInboxClick = onInboxClick)
-            SubScreen.PedidoFerias       -> PedidoFeriasScreen(
-                userName = fullName,
-                userId = tokenManager.getUserId(),
-                onBack = { subScreen = SubScreen.Home; viewModel.loadMyRequests() }
+            SubScreen.EmTurno -> ScreenEmTurno(
+                activeEmployees = uiState.activeEmployees,
+                onBack          = { subScreen = SubScreen.Home }
             )
-            SubScreen.PedidoTroca        -> PedidoTrocaScreen(
+            SubScreen.PedidoFerias -> PedidoFeriasScreen(
+                userName = fullName,
+                userId   = tokenManager.getUserId(),
+                onBack   = { subScreen = SubScreen.Home; viewModel.loadMyRequests() }
+            )
+            SubScreen.PedidoTroca -> PedidoTrocaScreen(
                 myShifts = uiState.shifts.filter { it.published },
-                userId = tokenManager.getUserId(),
-                onBack = { subScreen = SubScreen.Home; viewModel.loadMyRequests() }
+                userId   = tokenManager.getUserId(),
+                onBack   = { subScreen = SubScreen.Home; viewModel.loadMyRequests() }
             )
             SubScreen.ShiftSummary -> ShiftSummaryScreen(
                 clockedInSince = uiState.clockedInSince,
@@ -193,9 +195,6 @@ fun DashboardScreen(
                 }
             )
         }
-        if (showApproveDialog) {
-            ApproveDialog(onClose = { showApproveDialog = false })
-        }
     }
 }
 
@@ -205,6 +204,8 @@ private fun HomeScreen(
     firstName: String,
     shifts: List<Shift>,
     attendanceRecords: List<AttendanceRecord> = emptyList(),
+    activeEmployees: List<ActiveEmployee> = emptyList(),
+    allWeekShiftsCount: Int = 0,
     today: LocalDate,
     isClocked: Boolean = false,
     clockedInSince: String? = null,
@@ -213,7 +214,6 @@ private fun HomeScreen(
     onNavigate: (SubScreen) -> Unit,
     onLogout: () -> Unit,
     onProfileClick: () -> Unit = {},
-    onApprove: () -> Unit,
     onClockIn: () -> Unit = {},
     onClockOut: () -> Unit = {},
     onSchedulerClick: () -> Unit = {},
@@ -268,11 +268,35 @@ private fun HomeScreen(
         "%02d:%02d:%02d", clockedInSec / 3600, (clockedInSec % 3600) / 60, clockedInSec % 60
     )
 
+    // Minute-ticker para recalcular janela de registo de ponto
+    var currentTime by remember { mutableStateOf(LocalTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) { delay(30_000); currentTime = LocalTime.now() }
+    }
+
     // Dynamic greeting
-    val greetingWord = when (LocalTime.now().hour) {
+    val greetingWord = when (currentTime.hour) {
         in 5..11  -> "Bom dia"
         in 12..18 -> "Boa tarde"
         else      -> "Boa noite"
+    }
+
+    // A secção de registo de ponto só aparece:
+    //   - Se estiver clocked-in (enquanto não chegar auto-saída do backend)
+    //   - Se existir turno hoje E estiver dentro da janela [start-15min, end+15min]
+    val showClockSection = when {
+        isClocked -> {
+            val shiftEnd = todayShift?.let { runCatching { LocalTime.parse(it.resolvedEndTime()) }.getOrNull() }
+            shiftEnd == null || currentTime.isBefore(shiftEnd.plusMinutes(15))
+        }
+        todayShift != null -> {
+            val shiftStart = runCatching { LocalTime.parse(todayShift.resolvedStartTime()) }.getOrNull()
+            val shiftEnd   = runCatching { LocalTime.parse(todayShift.resolvedEndTime()) }.getOrNull()
+            val tooEarly   = shiftStart != null && currentTime.isBefore(shiftStart.minusMinutes(15))
+            val tooLate    = shiftEnd   != null && currentTime.isAfter(shiftEnd.plusMinutes(15))
+            !tooEarly && !tooLate
+        }
+        else -> false
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -292,32 +316,43 @@ private fun HomeScreen(
                         },
                         color = Color.White,
                         fontSize = 22.sp,
-                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 18.dp)
+                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 28.dp)
                     )
                 }
 
+                if (showClockSection) {
+                    item {
+                        ClockInSection(
+                            clockState  = clockState,
+                            todayShift  = todayShift,
+                            timerStr    = timerStr,
+                            clockedInAt = clockedInAt,
+                            onClockIn   = onClockIn,
+                            onClockOut  = onClockOut
+                        )
+                    }
+                }
+
+                item { SectionTitle("Resumo de Hoje", topPad = 8.dp) }
                 item {
-                    ClockInSection(
-                        clockState  = clockState,
-                        todayShift  = todayShift,
-                        timerStr    = timerStr,
-                        clockedInAt = clockedInAt,
-                        onClockIn   = onClockIn,
-                        onClockOut  = onClockOut
+                    TodaySnapshot(
+                        onNavigate           = onNavigate,
+                        activeEmployees      = activeEmployees,
+                        todayShift           = todayShift,
+                        attendanceRecords    = attendanceRecords,
+                        today                = today,
+                        shifts               = shifts,
+                        allWeekShiftsCount   = allWeekShiftsCount,
+                        pendingRequestsCount = timeOffRequests.count { it.status == "PENDING" } + shiftSwapRequests.count { it.status == "PENDING" }
                     )
                 }
 
-                item { SectionTitle("Resumo de Hoje") }
-                item { TodaySnapshot(onNavigate) }
-                item { SectionTitle("Resumo da Semana") }
-                item { WeekSnapshot(onNavigate) }
+                item { SectionTitle("Os Meus Turnos", topPad = 24.dp) }
+                item { MeusTurnosSection(shifts, attendanceRecords, today) }
 
-                item { SectionTitle("Esta Semana", topPad = 8.dp) }
-                item { EstaSemanaSection(shifts, attendanceRecords, today) }
-
-                item { SectionTitle("Pedidos Enviados", topPad = 8.dp) }
+                item { SectionTitle("Pedidos Enviados", topPad = 32.dp) }
                 item { PedidosEnviadosSection(timeOffRequests, shiftSwapRequests) }
-                item { Spacer(Modifier.height(28.dp)) }
+                item { Spacer(Modifier.height(40.dp)) }
             }
             AppBottomNav(
                 active               = NavTab.HOME,
@@ -406,30 +441,6 @@ private fun DashHeader(firstName: String, onProfileClick: () -> Unit) {
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp
-            )
-        }
-
-        // Flag icon (center)
-        Icon(
-            imageVector = Icons.Outlined.Flag,
-            contentDescription = null,
-            tint = Blue,
-            modifier = Modifier.size(30.dp)
-        )
-
-        // Help icon (right)
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .border(1.5.dp, Color(0xFF333333), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Help,
-                contentDescription = null,
-                tint = TxtGray,
-                modifier = Modifier.size(18.dp)
             )
         }
     }
@@ -765,139 +776,118 @@ private fun ShiftSummaryScreen(
 
 // ── TodaySnapshot ─────────────────────────────────────────────────────────────
 @Composable
-private fun TodaySnapshot(onNavigate: (SubScreen) -> Unit) {
-    data class TodayItem(val icon: ImageVector, val label: String, val value: String, val sub: SubScreen?)
-
-    val items = listOf(
-        TodayItem(Icons.Outlined.CheckCircle,    "Com Entrada Registada", "1",   SubScreen.EmTurno),
-        TodayItem(Icons.Outlined.Warning,        "Em Atraso",             "0",   null),
-        TodayItem(Icons.Outlined.Block,          "Folga",                 "1",   null),
+private fun TodaySnapshot(
+    onNavigate: (SubScreen) -> Unit,
+    activeEmployees: List<ActiveEmployee>,
+    todayShift: Shift? = null,
+    attendanceRecords: List<AttendanceRecord> = emptyList(),
+    today: LocalDate = LocalDate.now(),
+    shifts: List<Shift> = emptyList(),
+    allWeekShiftsCount: Int = 0,
+    pendingRequestsCount: Int = 0
+) {
+    data class TodayItem(
+        val icon: ImageVector,
+        val label: String,
+        val value: String,
+        val sub: SubScreen?,
+        val valueColor: Color = Color.White
     )
-    ListCard(modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 22.dp)) {
-        items.forEachIndexed { i, item ->
-            ListRow(
-                icon      = item.icon,
-                iconTint  = TxtGray,
-                label     = item.label,
-                value     = item.value,
-                valueColor = Color.White,
-                clickable = item.sub != null,
-                onClick   = { item.sub?.let(onNavigate) }
-            )
-            if (i < items.lastIndex) DkDivider()
+
+    val todayHoursStr = remember(attendanceRecords, today) {
+        val recs = attendanceRecords.filter { rec ->
+            runCatching {
+                java.time.Instant.parse(rec.timestamp)
+                    .atZone(java.time.ZoneId.systemDefault()).toLocalDate() == today
+            }.getOrDefault(false)
+        }.sortedBy { it.timestamp }
+        var totalMin = 0L
+        var lastIn: java.time.Instant? = null
+        for (rec in recs) {
+            if (rec.type == "IN") {
+                lastIn = runCatching { java.time.Instant.parse(rec.timestamp) }.getOrNull()
+            } else if (rec.type == "OUT" && lastIn != null) {
+                val out = runCatching { java.time.Instant.parse(rec.timestamp) }.getOrNull()
+                if (out != null) totalMin += java.time.Duration.between(lastIn, out).toMinutes()
+                lastIn = null
+            }
+        }
+        val h = totalMin / 60; val m = totalMin % 60
+        if (h > 0) "${h}h ${m}min" else if (m > 0) "${m}min" else "—"
+    }
+
+    val lateCount = remember(shifts, attendanceRecords) {
+        shifts.filter { it.published }.count { shift ->
+            val shiftDate = runCatching { LocalDate.parse(shift.date.substring(0, 10)) }.getOrNull()
+                ?: return@count false
+            val shiftStart = runCatching { LocalTime.parse(shift.resolvedStartTime()) }.getOrNull()
+                ?: return@count false
+            val dayRecs = attendanceRecords.filter { rec ->
+                runCatching {
+                    java.time.Instant.parse(rec.timestamp)
+                        .atZone(java.time.ZoneId.systemDefault()).toLocalDate() == shiftDate
+                }.getOrDefault(false)
+            }
+            val inRec = dayRecs.firstOrNull { it.type == "IN" } ?: return@count false
+            val actualIn = runCatching {
+                java.time.Instant.parse(inRec.timestamp)
+                    .atZone(java.time.ZoneId.systemDefault()).toLocalTime()
+            }.getOrNull() ?: return@count false
+            java.time.Duration.between(shiftStart, actualIn).toMinutes() > 5
         }
     }
-}
 
-// ── WeekSnapshot ──────────────────────────────────────────────────────────────
-@Composable
-private fun WeekSnapshot(onNavigate: (SubScreen) -> Unit) {
-    data class WeekItem(val icon: ImageVector, val label: String, val value: String, val valueColor: Color, val sub: SubScreen)
+    val shiftTimeStr = todayShift?.let {
+        val s = it.resolvedStartTime().take(5)
+        val e = it.resolvedEndTime().take(5)
+        "$s – $e"
+    } ?: "Sem turno"
 
     val items = listOf(
-        WeekItem(Icons.Outlined.DateRange,       "Total de Turnos Agendados",   "8", Color.White, SubScreen.TurnosAgendados),
+        TodayItem(Icons.Outlined.CheckCircle, "Em Turno Agora", activeEmployees.size.toString(), SubScreen.EmTurno),
+        TodayItem(Icons.Outlined.Schedule, "Turno de Hoje", shiftTimeStr, SubScreen.TurnosAgendados,
+            if (todayShift != null) Color.White else TxtGray),
+        TodayItem(Icons.Outlined.DateRange, "Turnos Agendados Esta Semana", allWeekShiftsCount.toString(), SubScreen.TurnosAgendados),
+        TodayItem(Icons.Outlined.HourglassEmpty, "Pedidos Pendentes",
+            if (pendingRequestsCount > 0) pendingRequestsCount.toString() else "—",
+            null,
+            if (pendingRequestsCount > 0) Orange else TxtGray),
     )
     ListCard(modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 22.dp)) {
         items.forEachIndexed { i, item ->
             ListRow(
                 icon       = item.icon,
-                iconTint   = if (item.valueColor == Orange) Orange else TxtGray,
+                iconTint   = TxtGray,
                 label      = item.label,
-                labelColor = item.valueColor,
                 value      = item.value,
                 valueColor = item.valueColor,
-                clickable  = true,
-                onClick    = { onNavigate(item.sub) }
+                clickable  = item.sub != null,
+                onClick    = { item.sub?.let(onNavigate) }
             )
             if (i < items.lastIndex) DkDivider()
         }
     }
 }
 
-// ── TodayTasksRow ─────────────────────────────────────────────────────────────
-@Composable
-private fun TodayTasksRow() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp)
-            .padding(bottom = 22.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Icon(Icons.Outlined.Assignment, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-            Text("Tarefas de Hoje", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-        }
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
-                .background(DkSurface2)
-                .padding(horizontal = 14.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text("0/3", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(16.dp))
-        }
-    }
-}
 
-// ── TimeOffCard ───────────────────────────────────────────────────────────────
+// ── MeusTurnosSection ─────────────────────────────────────────────────────────
 @Composable
-private fun TimeOffCard(onApprove: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .padding(horizontal = 14.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(DkSurface)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(13.dp),
-                modifier = Modifier.padding(bottom = 12.dp)
-            ) {
-                DkAvatar(initials = "MD", color = Color(0xFFC87941), size = 46)
-                Column {
-                    Text(
-                        "Maria Doe enviou-lhe um pedido de folga",
-                        color = Color.White, fontSize = 14.sp,
-                        modifier = Modifier.padding(bottom = 7.dp)
-                    )
-                    Text("Sex, 15 Mai 2026", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text("Dia Inteiro", color = Color.White, fontSize = 14.sp)
-                }
-            }
-            DkDivider()
-            Text("Consulta médica", color = TxtGray, fontSize = 14.sp, modifier = Modifier.padding(vertical = 11.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Button(
-                    onClick = onApprove,
-                    shape = RoundedCornerShape(22.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Blue)
-                ) {
-                    Icon(Icons.Outlined.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(7.dp))
-                    Text("Aprovar", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    }
-}
-
-// ── EstaSemanaSection ─────────────────────────────────────────────────────────
-@Composable
-private fun EstaSemanaSection(
+private fun MeusTurnosSection(
     shifts: List<Shift>,
     attendanceRecords: List<AttendanceRecord>,
     today: LocalDate
 ) {
-    // Apenas turnos publicados, ordenados por data
-    val weekShifts = shifts.filter { it.published }.sortedBy { it.date }.take(7)
-    val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
+    val allWeekShifts = shifts.filter { it.published }.sortedBy { it.date }
+    // Ponto de início: primeiro turno de hoje ou futuro; se não houver, mostra os últimos 3
+    val startIdx = allWeekShifts.indexOfFirst {
+        !LocalDate.parse(it.date.substring(0, 10)).isBefore(today)
+    }.let { if (it < 0) maxOf(0, allWeekShifts.size - 3) else it }
+    var showAll by remember { mutableStateOf(false) }
+    val weekShifts = if (showAll) allWeekShifts else allWeekShifts.drop(startIdx).take(3)
+    val hasMore = allWeekShifts.size > startIdx + 3
 
     Column(modifier = Modifier.padding(horizontal = 14.dp)) {
-        if (weekShifts.isEmpty()) {
+        if (allWeekShifts.isEmpty()) {
             Text(
                 "Sem turnos publicados esta semana.",
                 color = TxtGray,
@@ -949,35 +939,37 @@ private fun EstaSemanaSection(
                 val isFalta = isPast && inRecord == null
                 val isLate  = delayMin > 0
 
-                // Texto de horário: real se existe registo, caso contrário previsto
-                val timeText = when {
-                    actualIn != null && actualOut != null ->
-                        "${actualIn.format(timeFmt)} - ${actualOut.format(timeFmt)}"
-                    actualIn != null ->
-                        "${actualIn.format(timeFmt)} - ${shift.resolvedEndTime()}"
-                    else -> "${shift.resolvedStartTime()} - ${shift.resolvedEndTime()}"
+                // Duração prevista do turno
+                val durationStr = run {
+                    val s = runCatching { LocalTime.parse(shift.resolvedStartTime()) }.getOrNull()
+                    val e = runCatching { LocalTime.parse(shift.resolvedEndTime()) }.getOrNull()
+                    if (s != null && e != null) {
+                        val mins = if (e.isAfter(s))
+                            java.time.Duration.between(s, e).toMinutes()
+                        else
+                            java.time.Duration.between(s, e).toMinutes() + 24 * 60
+                        val h = mins / 60; val m = mins % 60
+                        if (m == 0L) "${h}h" else "${h}h${m}m"
+                    } else ""
+                }
+                // Tempo efetivamente trabalhado
+                val workedStr = if (actualIn != null && actualOut != null) {
+                    val dur = java.time.Duration.between(actualIn, actualOut).abs()
+                    val h = dur.toHours(); val m = dur.toMinutes() % 60
+                    if (m == 0L) "${h}h" else "${h}h${m}m"
+                } else null
+
+                // Status badge: Ausente / Concluído / Em Turno / Hoje / vazio
+                val (badgeLabel, badgeTextColor, badgeBgColor) = when {
+                    isFalta                         -> Triple("Ausente",   RedBadge, RedBadge.copy(alpha = 0.15f))
+                    isPast && actualOut != null      -> Triple("Concluído", TxtGray,  DkSurface2)
+                    isToday && actualIn != null      -> Triple("Em Turno", DkGreen,  DkGreen.copy(alpha = 0.15f))
+                    isLate                          -> Triple("+${delayMin}min", Orange, Orange.copy(alpha = 0.15f))
+                    isToday                         -> Triple("Hoje",      Blue,     Blue.copy(alpha = 0.15f))
+                    else                            -> Triple(null, Color.Transparent, Color.Transparent)
                 }
 
-                // Cor da barra lateral e badge
-                val borderColor = when {
-                    isFalta -> RedBadge
-                    isLate  -> Orange
-                    isPast  -> TxtGray
-                    isToday -> Blue
-                    else    -> Blue
-                }
-                val badgeText = when {
-                    isFalta -> "Falta"
-                    isLate  -> "+${delayMin}min"
-                    isPast  -> "Concluído"
-                    isToday -> "Hoje"
-                    else    -> null
-                }
-                val badgeColor = when {
-                    isFalta -> RedBadge
-                    isLate  -> Orange
-                    else    -> TxtGray
-                }
+                val shiftPositionLabel = shift.shiftType?.name ?: "Sem Posição"
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -994,41 +986,76 @@ private fun EstaSemanaSection(
                     Row(
                         modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(DkSurface)
                     ) {
-                        Box(modifier = Modifier.width(4.dp).fillMaxHeight().background(borderColor))
-                        Row(modifier = Modifier.weight(1f).padding(start = 10.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                // Azul: hora prevista do turno
+                        Box(modifier = Modifier.width(4.dp).fillMaxHeight().background(Blue))
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)
+                        ) {
+                            // Posição / tipo do turno em azul
+                            Text(
+                                shiftPositionLabel,
+                                color = Blue,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                            // Hora + badge na mesma linha
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Text(
-                                    "${shift.resolvedStartTime()} - ${shift.resolvedEndTime()}",
-                                    color = if (isFalta) RedBadge else Blue,
-                                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(bottom = 4.dp)
+                                    "${shift.resolvedStartTime().take(5)} - ${shift.resolvedEndTime().take(5)}",
+                                    color = if (isFalta) RedBadge else Color.White,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
-                                // Branco: hora real de entrada/saída (só mostra se existe registo)
-                                if (actualIn != null) {
-                                    Text(
-                                        timeText,
-                                        color = Color.White,
-                                        fontSize = 15.sp, fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                if (isLate) {
-                                    Text(
-                                        "Entrada com ${delayMin}min de atraso",
-                                        color = Orange, fontSize = 12.sp,
-                                        modifier = Modifier.padding(top = 2.dp)
-                                    )
+                                if (badgeLabel != null) {
+                                    DkStatusBadge(badgeLabel, badgeTextColor, badgeBgColor)
                                 }
                             }
-                            if (badgeText != null) {
-                                DkStatusBadge(badgeText, badgeColor, badgeColor.copy(alpha = 0.15f))
+                            // Duração (ou tempo trabalhado/esperado)
+                            val durationLine = when {
+                                workedStr != null && workedStr != durationStr ->
+                                    "$workedStr/$durationStr"
+                                durationStr.isNotEmpty() -> durationStr
+                                else -> ""
+                            }
+                            if (durationLine.isNotEmpty()) {
+                                Text(
+                                    durationLine,
+                                    color = TxtGray,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
                             }
                         }
                     }
                 }
             }
         }
-        Text("Mostrar mais...", color = TxtGray, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+        if (!showAll && hasMore) {
+            Text(
+                "Mostrar mais...",
+                color = Blue,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .padding(top = 4.dp, bottom = 8.dp)
+                    .clickable { showAll = true }
+            )
+        } else if (showAll && allWeekShifts.size > 3) {
+            Text(
+                "Mostrar menos",
+                color = TxtGray,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .padding(top = 4.dp, bottom = 8.dp)
+                    .clickable { showAll = false }
+            )
+        }
     }
 }
 
@@ -1361,249 +1388,117 @@ private fun OpenShiftCard(surfaceColor: Color = DkSurface) {
     }
 }
 
+// ── ScreenEmTurno — lista real de funcionários com ponto ativo ────────────────
 @Composable
-private fun ScreenEmPausa(onBack: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .padding(bottom = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(modifier = Modifier.clip(CircleShape).clickable { onBack() }.padding(4.dp)) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Voltar", tint = Color.White, modifier = Modifier.size(22.dp))
-            }
-            Text(
-                "Quinta-feira, 14 de Maio",
-                color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(Modifier.size(30.dp))
-        }
-        Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Text("EM PAUSA", color = Orange, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.5.sp)
-        }
-        Spacer(Modifier.height(16.dp))
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            DkAvatar(initials = "XB", color = Color.Transparent, size = 56, gradient = AvatarGrad)
-            Column {
-                Text("Vendas", color = Orange, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 2.dp))
-                Text("Xavier Bolotinha", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                Text("6:00p - 3:00a • 0/3", color = TxtGray, fontSize = 14.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScreenEmTurno(onBack: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .padding(bottom = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(modifier = Modifier.clip(CircleShape).clickable { onBack() }.padding(4.dp)) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Voltar", tint = Color.White, modifier = Modifier.size(22.dp))
-            }
-            Text(
-                "Quinta-feira, 14 de Maio",
-                color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(Modifier.size(30.dp))
-        }
-        Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Text("EM TURNO", color = DkGreen, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.5.sp)
-        }
-        Spacer(Modifier.height(16.dp))
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            DkAvatar(initials = "MD", color = Color(0xFFC87941), size = 56)
-            Column {
-                Text("Segurança", color = DkPurple, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 2.dp))
-                Text("Maria Doe", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                Text("9:00p - 6:00a • 0/3", color = TxtGray, fontSize = 14.sp)
-            }
-        }
-    }
-}
-
-
-@Composable
-private fun ScreenFolhasPonto(onBack: () -> Unit, onSchedulerClick: () -> Unit = {}, onNotificationsClick: () -> Unit = {}, onInboxClick: () -> Unit = {}) {
-    data class Entry(val id: Int, val name: String, val duration: String, val type: String, val initials: String, val avatarColor: Color)
-
-    val entries = listOf(
-        Entry(1, "Maria Doe",   "7h 55m", "Do Turno", "MD",   Color(0xFFC87941)),
-        Entry(2, "Michael Doe", "8h 0m",  "Manual",   "MDoe", Color(0xFF5B5FEF)),
-    )
-
-    var swipedId by remember { mutableStateOf<Int?>(null) }
+private fun ScreenEmTurno(
+    activeEmployees: List<ActiveEmployee>,
+    onBack: () -> Unit
+) {
+    val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
 
     Column(modifier = Modifier.fillMaxSize().background(DkBg)) {
         // Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .padding(bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Box(modifier = Modifier.clip(CircleShape).clickable { onBack() }.padding(4.dp)) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Voltar", tint = Color.White, modifier = Modifier.size(22.dp))
+                Icon(Icons.Filled.ArrowBack, null, tint = Color.White, modifier = Modifier.size(22.dp))
             }
             Text(
-                "Folhas de Ponto",
+                "Em Turno Agora",
                 color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f), textAlign = TextAlign.Center
+                textAlign = TextAlign.Center, modifier = Modifier.weight(1f)
             )
-            Icon(Icons.Outlined.FilterList, contentDescription = null, tint = Blue, modifier = Modifier.size(22.dp))
-            Box(
-                modifier = Modifier.size(34.dp).clip(CircleShape).background(DkSurface2),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Outlined.MoreVert, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-            }
-        }
-
-        // Tabs
-        Row(
-            modifier = Modifier
-                .padding(horizontal = 14.dp)
-                .padding(bottom = 16.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(DkSurface2)
-                .padding(3.dp)
-        ) {
-            Box(
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Color(0xFF555555)).padding(vertical = 9.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Pendentes", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
-            Box(
-                modifier = Modifier.weight(1f).padding(vertical = 9.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Todos", color = TxtGray, fontSize = 15.sp)
-            }
-        }
-
-        // Date header
-        Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text("Qua, 13 de Maio", color = TxtGray, fontSize = 13.sp)
-        }
-
-        // Entries list
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = 14.dp)
-        ) {
-            items(entries) { entry ->
-                val isSwiped = swipedId == entry.id
-                val offsetX by animateDpAsState(targetValue = if (isSwiped) (-240).dp else 0.dp, label = "swipe")
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RectangleShape)
-                ) {
-                    // Action buttons (behind the row)
-                    Row(modifier = Modifier.align(Alignment.CenterEnd).height(74.dp)) {
-                        Box(
-                            modifier = Modifier.width(80.dp).fillMaxHeight().background(RedReject).clickable { swipedId = null },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(Icons.Filled.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
-                                Text("Rejeitar", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        Box(
-                            modifier = Modifier.width(80.dp).fillMaxHeight().background(PurpleDk).clickable { swipedId = null },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(Icons.Outlined.Timer, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
-                                Text("Arredondar", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        Box(
-                            modifier = Modifier.width(80.dp).fillMaxHeight().background(Blue).clickable { swipedId = null },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(Icons.Outlined.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
-                                Text("Aprovar", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    // Main row (slides left on tap)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .offset(x = offsetX)
-                            .background(DkBg)
-                            .clickable { swipedId = if (isSwiped) null else entry.id }
-                            .padding(vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        DkAvatar(initials = entry.initials, color = entry.avatarColor, size = 50)
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(entry.name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            Text(entry.duration, color = TxtGray, fontSize = 14.sp)
-                            Text(entry.type, color = TxtGray, fontSize = 14.sp)
-                        }
-                        DkStatusBadge("Pendente", Orange, Orange.copy(alpha = 0.15f))
-                        Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = TxtGray, modifier = Modifier.size(16.dp))
-                    }
-                }
-                DkDivider()
-            }
-        }
-
-        // Approve all button
-        Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp).padding(bottom = 6.dp)) {
+            // badge com total
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(DkSurface)
-                    .clickable {}
-                    .padding(vertical = 16.dp),
-                contentAlignment = Alignment.Center
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(DkGreen.copy(alpha = 0.15f))
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(Icons.Outlined.Check, contentDescription = null, tint = Blue, modifier = Modifier.size(20.dp))
-                    Text("Aprovar todas as folhas pendentes", color = Blue, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "${activeEmployees.size} ativo${if (activeEmployees.size != 1) "s" else ""}",
+                    color = DkGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+
+        if (activeEmployees.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                    Icon(Icons.Outlined.EventAvailable, null, tint = TxtGray, modifier = Modifier.size(48.dp))
+                    Spacer(Modifier.height(12.dp))
+                    Text("Nenhum funcionário em turno", color = TxtGray, fontSize = 15.sp)
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(activeEmployees) { emp ->
+                    val initials = emp.name.split(" ").filter { it.isNotEmpty() }.take(2)
+                        .joinToString("") { it.first().uppercase() }
+
+                    val clockedInTime = runCatching {
+                        java.time.Instant.parse(emp.clockedInSince)
+                            .atZone(java.time.ZoneId.systemDefault()).toLocalTime()
+                            .format(timeFmt)
+                    }.getOrDefault("--:--")
+
+                    val elapsed = runCatching {
+                        val since = java.time.Instant.parse(emp.clockedInSince)
+                        val dur = java.time.Duration.between(since, java.time.Instant.now()).abs()
+                        val h = dur.toHours(); val m = dur.toMinutes() % 60
+                        if (h > 0) "${h}h ${m}min" else "${m}min"
+                    }.getOrDefault("")
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DkSurface)
+                    ) {
+                        Row {
+                            Box(modifier = Modifier.width(4.dp).fillMaxHeight().background(DkGreen))
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                DkAvatar(initials = initials, color = Blue, size = 46)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(emp.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                    Text(emp.employeeNumber, color = TxtGray, fontSize = 13.sp)
+                                    if (emp.shiftStart != null && emp.shiftEnd != null) {
+                                        Text(
+                                            "${emp.shiftStart} - ${emp.shiftEnd}",
+                                            color = Blue, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    DkStatusBadge("EM TURNO", DkGreen, DkGreen.copy(alpha = 0.15f))
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("Entrada: $clockedInTime", color = TxtGray, fontSize = 12.sp)
+                                    if (elapsed.isNotEmpty()) {
+                                        Text(elapsed, color = TxtGray, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
-
-        AppBottomNav(
-            active               = NavTab.HOME,
-            onSchedulerClick     = onSchedulerClick,
-            onNotificationsClick = onNotificationsClick,
-            onInboxClick         = onInboxClick
-        )
     }
-
 }
 
 // ── ScreenDisponibilidadePreferencia ──────────────────────────────────────────
@@ -2314,7 +2209,7 @@ private fun PedidoFeriasScreen(userName: String, userId: Int = -1, onBack: () ->
 
         // Banner de sucesso
         bannerMsg?.let { msg ->
-            LaunchedEffect(msg) { delay(2800); bannerMsg = null; onBack() }
+            LaunchedEffect(msg) { delay(2800); onBack() }
             Box(
                 modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)
                     .padding(top = 70.dp, start = 16.dp, end = 16.dp)
@@ -2548,7 +2443,7 @@ private fun PedidoTrocaScreen(myShifts: List<Shift>, userId: Int = -1, onBack: (
 
         // Banner de sucesso
         bannerMsg?.let { msg ->
-            LaunchedEffect(msg) { delay(2800); bannerMsg = null; onBack() }
+            LaunchedEffect(msg) { delay(2800); onBack() }
             Box(
                 modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)
                     .padding(top = 70.dp, start = 16.dp, end = 16.dp)
@@ -2641,154 +2536,117 @@ private fun PedidosEnviadosSection(
     timeOffRequests: List<TimeOffRequest> = emptyList(),
     shiftSwapRequests: List<ShiftSwapRequest> = emptyList()
 ) {
-    val dateFmt = DateTimeFormatter.ofPattern("d MMM yyyy", Locale("pt", "PT"))
+    val dateFmtLong = DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale("pt", "PT"))
 
-    fun statusColor(status: String) = when (status) {
-        "APPROVED" -> DkGreen
-        "REJECTED" -> RedBadge
-        else       -> Orange
-    }
-    fun statusLabel(status: String) = when (status) {
-        "APPROVED" -> "Aprovado"
-        "REJECTED" -> "Rejeitado"
-        else       -> "Pendente"
-    }
-    fun swapStatusLabel(req: ShiftSwapRequest) = when {
-        req.status == "APPROVED"   -> "Aprovado"
-        req.status == "REJECTED"   -> "Rejeitado"
-        req.targetAccepted == null -> "Aguarda resposta do colega"
-        req.targetAccepted == true -> "Aguarda aprovação"
-        else                       -> "Pendente"
-    }
-    fun formatDate(iso: String): String = runCatching {
-        LocalDate.parse(iso.substring(0, 10)).format(dateFmt)
+    fun formatDate(iso: String) = runCatching {
+        LocalDate.parse(iso.substring(0, 10)).format(dateFmtLong).replaceFirstChar { it.uppercaseChar() }
     }.getOrDefault(iso.substring(0, 10))
 
-    val hasAny = timeOffRequests.isNotEmpty() || shiftSwapRequests.isNotEmpty()
+    // Só mostra pedidos PENDENTES
+    val pendingTor = timeOffRequests.filter { it.status == "PENDING" }
+    val pendingSsr = shiftSwapRequests.filter { it.status == "PENDING" }
+    val hasAny = pendingTor.isNotEmpty() || pendingSsr.isNotEmpty()
 
-    Column(
-        modifier = Modifier
-            .padding(horizontal = 14.dp)
-            .padding(bottom = 22.dp)
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(DkSurface)
-    ) {
+    Column(modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 22.dp).fillMaxWidth()) {
         if (!hasAny) {
             Box(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 20.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp)).background(DkSurface)
+                    .padding(horizontal = 16.dp, vertical = 20.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Outlined.Inbox, null, tint = TxtGray, modifier = Modifier.size(32.dp))
                     Spacer(Modifier.height(8.dp))
-                    Text("Sem pedidos enviados", color = TxtGray, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-                    Text("Os seus pedidos de férias e trocas aparecerão aqui.", color = TxtGray.copy(alpha = 0.6f), fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    Text(
+                        "Sem pedidos pendentes",
+                        color = TxtGray, fontSize = 14.sp, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         } else {
-            timeOffRequests.forEach { req ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            pendingTor.forEach { req ->
+                val dateRange = if (req.startDate.substring(0, 10) == req.endDate.substring(0, 10)) {
+                    formatDate(req.startDate)
+                } else {
+                    "${formatDate(req.startDate)} – ${formatDate(req.endDate)}"
+                }
+                val durationLabel = if (req.allDay) "Dia Inteiro" else "Parcial"
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(DkSurface)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Box(
-                                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Blue.copy(alpha = 0.15f)).padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) { Text("Férias", color = Blue, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
-                            Box(
-                                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(statusColor(req.status).copy(alpha = 0.15f)).padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) { Text(statusLabel(req.status), color = statusColor(req.status), fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
-                        }
-                        Spacer(Modifier.height(4.dp))
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        Text("Pedido de Férias", color = TxtGray, fontSize = 13.sp)
+                        Spacer(Modifier.height(2.dp))
+                        Text(dateRange, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text(durationLabel, color = TxtGray, fontSize = 14.sp)
+                    }
+                    DkDivider()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("↳", color = TxtGray, fontSize = 14.sp)
                         Text(
-                            "${formatDate(req.startDate)} – ${formatDate(req.endDate)}",
-                            color = Color.White, fontSize = 14.sp
+                            "Aguarda aprovação da gestão",
+                            color = TxtGray,
+                            fontSize = 13.sp
                         )
-                        if (!req.reason.isNullOrBlank()) {
-                            Text(req.reason, color = TxtGray, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
-                        }
-                        if (!req.approvedByName.isNullOrBlank() && req.status != "PENDING") {
-                            val byLabel = if (req.status == "APPROVED") "Aprovado por" else "Rejeitado por"
-                            Text("$byLabel: ${req.approvedByName}", color = TxtGray, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
-                        }
                     }
                 }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.06f)))
             }
-            shiftSwapRequests.forEach { req ->
-                val myDate = req.requesterShift?.let { runCatching { LocalDate.parse(it.date.substring(0, 10)).format(dateFmt) }.getOrDefault("") } ?: ""
-                val colDate = req.targetShift?.let { runCatching { LocalDate.parse(it.date.substring(0, 10)).format(dateFmt) }.getOrDefault("") } ?: ""
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+
+            pendingSsr.forEach { req ->
+                val myDate = req.requesterShift?.let { formatDate(it.date) } ?: ""
+                val colDate = req.targetShift?.let { formatDate(it.date) } ?: ""
+                val swapLabel = when {
+                    req.targetAccepted == null -> "Aguarda resposta do colega"
+                    req.targetAccepted == true -> "Aguarda aprovação da gestão"
+                    else                       -> "Pendente"
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(DkSurface)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Box(
-                                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(DkPurple.copy(alpha = 0.15f)).padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) { Text("Troca", color = DkPurple, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
-                            Box(
-                                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(statusColor(req.status).copy(alpha = 0.15f)).padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) { Text(swapStatusLabel(req), color = statusColor(req.status), fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
-                        }
-                        Spacer(Modifier.height(4.dp))
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        Text("Pedido de Troca", color = TxtGray, fontSize = 13.sp)
+                        Spacer(Modifier.height(2.dp))
                         Text(
-                            "$myDate ↔ $colDate",
-                            color = Color.White, fontSize = 14.sp
+                            if (myDate.isNotEmpty() && colDate.isNotEmpty()) "$myDate ↔ $colDate" else myDate,
+                            color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold
                         )
-                        if (!req.reason.isNullOrBlank()) {
-                            Text(req.reason, color = TxtGray, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
-                        }
-                        if (!req.approvedByName.isNullOrBlank() && req.status != "PENDING") {
-                            val byLabel = if (req.status == "APPROVED") "Aprovado por" else "Rejeitado por"
-                            Text("$byLabel: ${req.approvedByName}", color = TxtGray, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                        val myTime = req.requesterShift?.let { "${it.resolvedStartTime().take(5)} – ${it.resolvedEndTime().take(5)}" }
+                        if (!myTime.isNullOrBlank()) {
+                            Text(myTime, color = TxtGray, fontSize = 14.sp)
                         }
                     }
+                    DkDivider()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("↳", color = TxtGray, fontSize = 14.sp)
+                        Text(swapLabel, color = TxtGray, fontSize = 13.sp)
+                    }
                 }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.06f)))
             }
         }
     }
 }
 
-// ── ApproveDialog ─────────────────────────────────────────────────────────────
-@Composable
-private fun ApproveDialog(onClose: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.5f))
-            .clickable { onClose() },
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .width(300.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(DkSurface2)
-                .clickable {}
-                .padding(24.dp)
-        ) {
-            Column {
-                Text(
-                    "Aprovar este pedido de folga?",
-                    color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(bottom = 24.dp)
-                )
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onClose) {
-                        Text("APROVAR", color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = onClose) {
-                        Text("CANCELAR", color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-}

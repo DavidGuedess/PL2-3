@@ -2,6 +2,7 @@ package pt.ualg.miaugenda.data.remote
 
 import pt.ualg.miaugenda.data.model.CreateUserRequest
 import pt.ualg.miaugenda.data.model.UpdateProfileRequest
+import pt.ualg.miaugenda.data.model.UpdateUserRequest
 import pt.ualg.miaugenda.data.model.User
 import retrofit2.Response
 import retrofit2.http.Body
@@ -26,6 +27,12 @@ interface UserApi {
     @POST("users")
     suspend fun createUser(
         @Body request: CreateUserRequest
+    ): Response<User>
+
+    @PATCH("users/{id}")
+    suspend fun updateUser(
+        @Path("id") id: Int,
+        @Body request: UpdateUserRequest
     ): Response<User>
 
     @PATCH("users/{id}/deactivate")

@@ -354,6 +354,47 @@ router.patch('/me', validate(updateUserMeSchema), async (req: Request, res: Resp
 
 /**
  * @openapi
+ * /users/{id}:
+ *   patch:
+ *     tags: [Users]
+ *     summary: Editar informações de um utilizador (Admin)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Utilizador atualizado
+ *       403:
+ *         description: Sem permissão
+ *       404:
+ *         description: Utilizador não encontrado
+ */
+router.patch('/:id', requireRole('ADMIN'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = Number(req.params.id)
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user) return res.status(404).json({ message: 'User not found' })
+    const { name, email, contact, role, category } = req.body
+    const data: Record<string, unknown> = {}
+    if (name !== undefined) data.name = name
+    if (email !== undefined) data.email = email
+    if (contact !== undefined) data.contact = contact
+    if (role !== undefined) data.role = role
+    if (category !== undefined) data.category = category
+    const updated = await prisma.user.update({ where: { id: userId }, data })
+    return res.status(200).json(toPublic(updated))
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * @openapi
  * /users/{id}/deactivate:
  *   patch:
  *     tags: [Users]

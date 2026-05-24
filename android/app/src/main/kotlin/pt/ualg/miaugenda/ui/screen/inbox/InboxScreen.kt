@@ -75,7 +75,12 @@ private val avatarColors = listOf(
 private sealed class InboxSubScreen {
     object Main : InboxSubScreen()
     object BrowseChannels : InboxSubScreen()
-    data class ChatRoom(val channelId: Int, val channelName: String) : InboxSubScreen()
+    data class ChatRoom(
+        val channelId: Int,
+        val channelName: String,
+        val channelType: String = "GROUP",
+        val createdById: Int = 0
+    ) : InboxSubScreen()
 }
 
 @Composable
@@ -83,7 +88,8 @@ fun InboxScreen(
     onSchedulerClick: () -> Unit = {},
     onNotificationsClick: () -> Unit = {},
     onHomeClick: () -> Unit = {},
-    onEquipaClick: () -> Unit = {}
+    onEquipaClick: () -> Unit = {},
+    dmWithUserId: Int? = null
 ) {
     val context = LocalContext.current
     val tokenManager = MiauGendaApp.getTokenManager(context)
@@ -91,6 +97,21 @@ fun InboxScreen(
     val currentUserRole = tokenManager.getUserRole() ?: "EMPLOYEE"
 
     var screen by remember { mutableStateOf<InboxSubScreen>(InboxSubScreen.Main) }
+
+    // Auto-abrir DM quando navegado com um userId específico
+    LaunchedEffect(dmWithUserId) {
+        if (dmWithUserId != null && dmWithUserId > 0) {
+            val channel = findOrCreateDmChannel(currentUserId, dmWithUserId)
+            if (channel != null) {
+                // Obter o nome do utilizador para mostrar como título da conversa
+                val displayName = try {
+                    RetrofitClient.userApi.getUsers().body()
+                        ?.find { it.id == dmWithUserId }?.name ?: channel.name
+                } catch (_: Exception) { channel.name }
+                screen = InboxSubScreen.ChatRoom(channel.id, displayName, channel.type, channel.createdById)
+            }
+        }
+    }
 
     BackHandler(enabled = screen !is InboxSubScreen.Main) {
         screen = InboxSubScreen.Main
@@ -101,7 +122,7 @@ fun InboxScreen(
             is InboxSubScreen.Main -> InboxMain(
                 currentUserId        = currentUserId,
                 onBrowse             = { screen = InboxSubScreen.BrowseChannels },
-                onChannelClick       = { channel -> screen = InboxSubScreen.ChatRoom(channel.id, channel.name) },
+                onChannelClick       = { channel -> screen = InboxSubScreen.ChatRoom(channel.id, channel.name, channel.type, channel.createdById) },
                 onSchedulerClick     = onSchedulerClick,
                 onNotificationsClick = onNotificationsClick,
                 onHomeClick          = onHomeClick,
@@ -111,13 +132,16 @@ fun InboxScreen(
                 currentUserId    = currentUserId,
                 currentUserRole  = currentUserRole,
                 onBack           = { screen = InboxSubScreen.Main },
-                onSelectChannel  = { channel, displayName -> screen = InboxSubScreen.ChatRoom(channel.id, displayName) }
+                onSelectChannel  = { channel, displayName -> screen = InboxSubScreen.ChatRoom(channel.id, displayName, channel.type, channel.createdById) }
             )
             is InboxSubScreen.ChatRoom -> ChatRoomScreen(
-                channelId     = s.channelId,
-                channelName   = s.channelName,
-                currentUserId = currentUserId,
-                onBack        = { screen = InboxSubScreen.Main }
+                channelId       = s.channelId,
+                channelName     = s.channelName,
+                channelType     = s.channelType,
+                createdById     = s.createdById,
+                currentUserId   = currentUserId,
+                currentUserRole = currentUserRole,
+                onBack          = { screen = InboxSubScreen.Main }
             )
         }
     }
@@ -281,7 +305,7 @@ private fun ChannelRow(channel: Channel, onClick: () -> Unit) {
 private suspend fun findOrCreateDmChannel(currentUserId: Int, targetUserId: Int): Channel? {
     val dmName = "dm-${minOf(currentUserId, targetUserId)}-${maxOf(currentUserId, targetUserId)}"
     val createResp = RetrofitClient.messagingApi.createChannel(
-        CreateChannelRequest(name = dmName, description = null, isPublic = false)
+        CreateChannelRequest(name = dmName, description = null, isPublic = false, type = "DM", memberIds = listOf(targetUserId))
     )
     if (createResp.isSuccessful) return createResp.body()
     if (createResp.code() == 409) {
@@ -387,6 +411,7 @@ private fun BrowseChannelsScreen(
                     .clip(RoundedCornerShape(16.dp))
                     .background(DkSurface)
                     .padding(horizontal = 20.dp, vertical = 20.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
                 Text(
                     if (isAnnouncement) "Canal de Anúncios" else "Novo Grupo",
@@ -436,8 +461,7 @@ private fun BrowseChannelsScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     Column(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp)
-                            .verticalScroll(rememberScrollState())
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         users.forEach { user ->
                             val checked = user.id in selectedMemberIds
@@ -644,9 +668,27 @@ private fun BrowseChannelsScreen(
 private fun ChatRoomScreen(
     channelId: Int,
     channelName: String,
+    channelType: String = "GROUP",
+    createdById: Int = 0,
     currentUserId: Int,
+    currentUserRole: String = "EMPLOYEE",
     onBack: () -> Unit
 ) {
+    val isAdmin = currentUserRole == "ADMIN"
+    val isEmployee = currentUserRole == "EMPLOYEE"
+    val isAnnouncement = channelType == "ANNOUNCEMENT"
+    // Regras de eliminação: admin pode apagar tudo; outros só podem apagar DMs ou grupos que criaram
+    // exceto "Todos" (nome especial) e canais de anúncios
+    val canDelete = when {
+        isAdmin -> true
+        channelName == "Todos" -> false
+        isAnnouncement -> false
+        channelType == "DM" -> true
+        createdById == currentUserId -> true
+        else -> false
+    }
+    // EMPLOYEE não pode enviar mensagens em canais de anúncios
+    val canSend = !(isEmployee && isAnnouncement)
     var messages by remember { mutableStateOf<List<ChannelMessage>>(emptyList()) }
     var messageText by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
@@ -698,11 +740,13 @@ private fun ChatRoomScreen(
                         text = { Text("Detalhes do canal", color = Color.White, fontSize = 15.sp) },
                         onClick = { showMenu = false }
                     )
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
-                    DropdownMenuItem(
-                        text = { Text("Apagar conversa", color = Color(0xFFFF3B30), fontSize = 15.sp) },
-                        onClick = { showMenu = false; showDeleteDialog = true }
-                    )
+                    if (canDelete) {
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+                        DropdownMenuItem(
+                            text = { Text("Apagar conversa", color = Color(0xFFFF3B30), fontSize = 15.sp) },
+                            onClick = { showMenu = false; showDeleteDialog = true }
+                        )
+                    }
                 }
             }
         }
@@ -755,44 +799,55 @@ private fun ChatRoomScreen(
             )
         }
 
-        Box(
-            modifier = Modifier.fillMaxWidth().background(DkSurface)
-                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(0.dp))
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(
-                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(20.dp)).background(DkSurface2)
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                ) {
-                    if (messageText.isEmpty()) Text("Enviar uma mensagem...", color = TxtGray, fontSize = 15.sp)
-                    BasicTextField(
-                        value = messageText, onValueChange = { messageText = it },
-                        singleLine = false, maxLines = 4,
-                        textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
-                        cursorBrush = SolidColor(Blue), modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                val canSend = messageText.isNotBlank() && !isSending
-                Box(
-                    modifier = Modifier.size(40.dp).clip(CircleShape)
-                        .background(if (canSend) Blue else DkSurface2)
-                        .clickable(enabled = canSend) {
-                            val content = messageText.trim()
-                            messageText = ""
-                            isSending = true
-                            scope.launch {
-                                try {
-                                    val resp = RetrofitClient.messagingApi.sendMessage(channelId, SendMessageRequest(content))
-                                    if (resp.isSuccessful) resp.body()?.let { messages = messages + it }
-                                } catch (_: Exception) {}
-                                isSending = false
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Filled.Send, contentDescription = "Enviar",
-                        tint = if (canSend) Color.White else TxtGray, modifier = Modifier.size(18.dp))
+        if (!canSend) {
+            Box(
+                modifier = Modifier.fillMaxWidth().background(DkSurface)
+                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(0.dp))
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Apenas gestores podem enviar mensagens neste canal.", color = TxtGray, fontSize = 13.sp, textAlign = TextAlign.Center)
+            }
+        } else {
+            Box(
+                modifier = Modifier.fillMaxWidth().background(DkSurface)
+                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(0.dp))
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(20.dp)).background(DkSurface2)
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        if (messageText.isEmpty()) Text("Enviar uma mensagem...", color = TxtGray, fontSize = 15.sp)
+                        BasicTextField(
+                            value = messageText, onValueChange = { messageText = it },
+                            singleLine = false, maxLines = 4,
+                            textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                            cursorBrush = SolidColor(Blue), modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    val canSendMsg = messageText.isNotBlank() && !isSending
+                    Box(
+                        modifier = Modifier.size(40.dp).clip(CircleShape)
+                            .background(if (canSendMsg) Blue else DkSurface2)
+                            .clickable(enabled = canSendMsg) {
+                                val content = messageText.trim()
+                                messageText = ""
+                                isSending = true
+                                scope.launch {
+                                    try {
+                                        val resp = RetrofitClient.messagingApi.sendMessage(channelId, SendMessageRequest(content))
+                                        if (resp.isSuccessful) resp.body()?.let { messages = messages + it }
+                                    } catch (_: Exception) {}
+                                    isSending = false
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.Send, contentDescription = "Enviar",
+                            tint = if (canSendMsg) Color.White else TxtGray, modifier = Modifier.size(18.dp))
+                    }
                 }
             }
         }
