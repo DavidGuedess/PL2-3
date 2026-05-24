@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import pt.ualg.miaugenda.data.model.TimeOffRequest
 import pt.ualg.miaugenda.data.model.ShiftSwapRequest
@@ -192,7 +193,12 @@ fun NotificationsScreen(
         }
     }
 
-    LaunchedEffect(Unit) { loadNotifications() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            loadNotifications()
+            delay(5000)
+        }
+    }
 
     val detailItem   = detailItemId?.let { id -> notifications.find { it.id == id } }
 
