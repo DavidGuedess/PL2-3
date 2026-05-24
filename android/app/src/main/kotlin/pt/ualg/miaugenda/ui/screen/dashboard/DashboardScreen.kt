@@ -155,7 +155,11 @@ fun DashboardScreen(
                 timeOffRequests       = uiState.timeOffRequests.filter { it.userId == currentUserId },
                 shiftSwapRequests     = uiState.shiftSwapRequests.filter { it.requesterId == currentUserId },
                 onNavigate            = { subScreen = it },
-                onLogout              = { tokenManager.clearTokens(); onLogout() },
+                onLogout              = {
+                    pt.ualg.miaugenda.data.notif.stopPollingForRequests(context.applicationContext)
+                    tokenManager.clearTokens()
+                    onLogout()
+                },
                 onProfileClick        = onProfileClick,
                 onClockIn             = { viewModel.clockIn {} },
                 onClockOut            = { subScreen = SubScreen.ShiftSummary },

@@ -72,7 +72,10 @@ private data class NotifItem(
     val isTargetResponse: Boolean = false,
     val createdAt: String = "",
     // true quando é o próprio utilizador que fez o pedido (não pode aprovar/rejeitar)
-    val isOwnRequest: Boolean = false
+    val isOwnRequest: Boolean = false,
+    // true em pedidos de troca pendentes em que o colega ainda não respondeu
+    val awaitingTarget: Boolean = false,
+    val targetEmployeeName: String? = null
 )
 
 private val dateFmtShort = DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale("pt", "PT"))
@@ -126,7 +129,9 @@ private fun ssrToNotifItem(req: ShiftSwapRequest, currentUserId: Int): NotifItem
         approvedByName  = req.approvedByName,
         requestCategory = "swap",
         isTargetResponse = isTargetResponse,
-        createdAt       = req.createdAt
+        createdAt       = req.createdAt,
+        awaitingTarget  = req.targetAccepted == null && req.status == "PENDING",
+        targetEmployeeName = req.targetShift?.user?.name
     )
 }
 
@@ -161,10 +166,9 @@ fun NotificationsScreen(
                 val torItems: List<NotifItem>
 
                 if (isManager) {
-                    // gestor vê pedidos onde o target já aceitou (aguarda aprovação) ou já processados
-                    // mas marca os seus próprios pedidos como isOwnRequest (não pode aprovar os seus)
+                    // gestor vê todos os pedidos; quando o colega ainda não respondeu,
+                    // o cartão fica em modo informativo (sem aprovar/rejeitar) — ver awaitingTarget
                     swapItems = rawSwaps
-                        .filter { it.targetAccepted == true || it.status != "PENDING" }
                         .map { ssr ->
                             val item = ssrToNotifItem(ssr, currentUserId)
                             if (ssr.requesterId == currentUserId) item.copy(isOwnRequest = true) else item
@@ -533,6 +537,10 @@ private fun NotifCard(
             if (item.employeeName.isNotBlank()) {
                 Text("Funcionário: ${item.employeeName}", color = TxtGray, fontSize = 13.sp)
             }
+            if (item.awaitingTarget) {
+                val who = item.targetEmployeeName?.takeIf { it.isNotBlank() } ?: "o colega"
+                Text("Aguarda resposta de $who", color = Orange, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
             if (isProcessed && !item.approvedByName.isNullOrBlank()) {
                 val actionLabel = if (item.status == NotifStatus.REJEITADO) "Rejeitado por:" else "Aprovado por:"
                 Text(
@@ -578,7 +586,7 @@ private fun NotifCard(
                 ) {
                     Text("Aceitar", color = DkGreen, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
-            } else if (!item.isOwnRequest) {
+            } else if (!item.isOwnRequest && !item.awaitingTarget) {
                 HorizontalDivider(color = dividerColor)
                 Box(
                     modifier = Modifier
@@ -768,7 +776,10 @@ private fun NotificationDetailScreen(
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = DkGreen)
                         ) { Text("Aceitar ✓", color = Color.White, fontSize = 15.sp) }
-                    } else {
+                    } else if (item.awaitingTarget) {
+                        val who = item.targetEmployeeName?.takeIf { it.isNotBlank() } ?: "o colega"
+                        Text("Aguarda resposta de $who", color = Orange, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    } else if (!item.isOwnRequest) {
                         Button(
                             onClick = onReject,
                             shape = RoundedCornerShape(10.dp),
