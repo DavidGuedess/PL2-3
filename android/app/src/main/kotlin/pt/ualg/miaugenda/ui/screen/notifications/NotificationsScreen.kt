@@ -159,8 +159,10 @@ fun NotificationsScreen(
     fun loadNotifications() {
         scope.launch {
             try {
-                val rawSwaps = RetrofitClient.requestApi.getShiftSwapRequests().body().orEmpty()
-                val rawTor   = RetrofitClient.requestApi.getTimeOffRequests().body().orEmpty()
+                val swapsResp = RetrofitClient.requestApi.getShiftSwapRequests()
+                val torResp   = RetrofitClient.requestApi.getTimeOffRequests()
+                val rawSwaps  = if (swapsResp.isSuccessful) swapsResp.body().orEmpty() else emptyList()
+                val rawTor    = if (torResp.isSuccessful)   torResp.body().orEmpty()   else emptyList()
 
                 val swapItems: List<NotifItem>
                 val torItems: List<NotifItem>
