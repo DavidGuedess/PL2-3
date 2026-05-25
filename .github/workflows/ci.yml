@@ -14,9 +14,9 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: pawschedule
-          POSTGRES_PASSWORD: pawschedule
-          POSTGRES_DB: pawschedule_test
+          POSTGRES_USER: miaugenda
+          POSTGRES_PASSWORD: miaugenda
+          POSTGRES_DB: miaugenda_test
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready
@@ -44,7 +44,7 @@ jobs:
       - name: Run tests
         working-directory: ./backend
         env:
-          DATABASE_URL: postgresql://pawschedule:pawschedule@localhost:5432/pawschedule_test
+          DATABASE_URL: postgresql://miaugenda:miaugenda@localhost:5432/miaugenda_test
           JWT_SECRET: test-secret-key
           NODE_ENV: test
         run: npm test
