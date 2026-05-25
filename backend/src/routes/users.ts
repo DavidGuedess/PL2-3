@@ -218,6 +218,19 @@ router.get('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Respo
  *       401:
  *         description: Não autenticado
  */
+router.get('/colleagues', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: { active: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, employeeNumber: true, name: true, role: true, category: true, profilePicture: true, active: true }
+    })
+    return res.status(200).json(users)
+  } catch (err) {
+    next(err)
+  }
+})
+
 router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = await getAuthenticatedUser(req)

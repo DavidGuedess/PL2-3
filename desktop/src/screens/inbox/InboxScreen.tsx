@@ -2,18 +2,13 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Megaphone, Users, MessageSquare, Check, Plus } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
-import {
-  createChannel,
-  deleteChannel,
-  getChannels,
-  getMessages,
-  sendMessage,
-} from "../../api/messagingApi";
-import { getUsers } from "../../api/userApi";
+import { createChannel, deleteChannel, getChannels, getMessages, sendMessage } from "../../api/messagingApi";
+import { getColleagues } from "../../api/userApi";
 import { UserAvatar } from "../../components/UserAvatar";
 import type { Channel, ChannelMessage } from "../../models/messaging";
 import type { User } from "../../models/user";
 import { tokenManager } from "../../storage/tokenManager";
+
 
 const INBOX_REFRESH_MS = 1000;
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
@@ -180,8 +175,8 @@ export function InboxScreen() {
   }
 
   async function loadUsers() {
-    const list = await getUsers();
-    setUsers(list.filter((u) => u.active && u.id !== currentUserId));
+    const list = await getColleagues();
+    setUsers(list.filter(u => u.id !== currentUserId) as User[]);
   }
 
   async function openChannel(id: number) {
@@ -581,13 +576,9 @@ export function InboxScreen() {
 
               {messages.map((msg) => {
                 const isOwn = msg.userId === currentUserId;
-                const senderName = isOwn
-                  ? "Eu"
-                  : (msg.user?.name ?? `Utilizador #${msg.userId}`);
-                const pic = isOwn
-                  ? tokenManager.getProfilePicture()
-                  : msg.user?.profilePicture;
-
+                const senderName = isOwn ? "Eu" : (msg.user?.name ?? `Utilizador #${msg.userId}`);
+                const avatarName = isOwn ? (tokenManager.getUserName() ?? "Eu") : senderName;
+                const pic = isOwn ? tokenManager.getProfilePicture() : msg.user?.profilePicture;
                 return (
                   <div
                     key={msg.id}
@@ -596,12 +587,12 @@ export function InboxScreen() {
                     {avatarSrc(pic) ? (
                       <img
                         src={avatarSrc(pic)!}
-                        alt={senderName}
+                        alt={avatarName}
                         className="msg-avatar"
                         style={{ objectFit: "cover", borderRadius: "50%" }}
                       />
                     ) : (
-                      <div className="msg-avatar">{initials(senderName)}</div>
+                      <div className="msg-avatar">{initials(avatarName)}</div>
                     )}
 
                     <div className="msg-body">
