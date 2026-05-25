@@ -36,3 +36,8 @@ npm-debug.log*
 
 # Script build cache
 .backend-build-hash
+
+# Relatório
+*.docx
+*.pdf
+~$*

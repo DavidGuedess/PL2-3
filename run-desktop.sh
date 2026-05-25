@@ -13,6 +13,8 @@ echo -e "  ${CYAN}MiauGenda Desktop Launcher${NC}"
 echo -e "  ${GRAY}---------------------------${NC}"
 echo ""
 
+[ ! -f "$ROOT/.env" ] && cp "$ROOT/.env.example" "$ROOT/.env"
+
 # ── 1. Docker Desktop ─────────────────────────────────────────────────────────
 echo -e "[1/4] ${YELLOW}A verificar Docker...${NC}"
 if ! docker info > /dev/null 2>&1; then
@@ -129,4 +131,6 @@ echo -e "  ${GRAY}  EMP001 / password123  — Employee — Mariana Ferreira${NC}
 echo -e "  ${GRAY}  EMP002 / password123  — Employee — Carlos Rodrigues${NC}"
 echo ""
 
-npm run electron:dev
+echo -e "  Modo\n  1. Browser\n  2. Electron"
+read -r -p "  > " modo
+[ "$modo" = "2" ] && npm run electron:dev || npm run dev -- --open
