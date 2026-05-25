@@ -9,7 +9,7 @@ const messageSelect = {
   userId: true,
   content: true,
   createdAt: true,
-  user: { select: { id: true, name: true } }
+  user: { select: { id: true, name: true, profilePicture: true } }
 }
 
 export const getChannels = async (req: Request, res: Response, next: NextFunction) => {

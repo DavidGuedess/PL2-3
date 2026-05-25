@@ -44,6 +44,7 @@ model User {
   email          String         @unique
   passwordHash   String
   contact        String?
+  profilePicture String?
   role           Role           @default(EMPLOYEE)
   category       Category
   active         Boolean        @default(true)

@@ -8,6 +8,7 @@ const KEY_USER_EMAIL = "user_email";
 const KEY_USER_ROLE = "user_role";
 const KEY_USER_CATEGORY = "user_category";
 const KEY_EMPLOYEE_NUMBER = "employee_number";
+const KEY_PROFILE_PICTURE = "profile_picture";
 
 export const tokenManager = {
   saveTokens(accessToken: string, refreshToken: string, user: User): void {
@@ -19,6 +20,8 @@ export const tokenManager = {
     localStorage.setItem(KEY_USER_ROLE, user.role);
     localStorage.setItem(KEY_USER_CATEGORY, user.category);
     localStorage.setItem(KEY_EMPLOYEE_NUMBER, user.employeeNumber);
+    if (user.profilePicture) localStorage.setItem(KEY_PROFILE_PICTURE, user.profilePicture);
+    else localStorage.removeItem(KEY_PROFILE_PICTURE);
   },
 
   getAccessToken(): string | null {
@@ -67,6 +70,7 @@ export const tokenManager = {
     localStorage.removeItem(KEY_USER_ROLE);
     localStorage.removeItem(KEY_USER_CATEGORY);
     localStorage.removeItem(KEY_EMPLOYEE_NUMBER);
+    localStorage.removeItem(KEY_PROFILE_PICTURE);
   },
 
   updateAccessToken(accessToken: string): void {
@@ -81,5 +85,14 @@ export const tokenManager = {
   updateUserData(name: string, category: string): void {
     localStorage.setItem(KEY_USER_NAME, name);
     localStorage.setItem(KEY_USER_CATEGORY, category);
+  },
+
+  getProfilePicture(): string | null {
+    return localStorage.getItem(KEY_PROFILE_PICTURE);
+  },
+
+  updateProfilePicture(url: string | null): void {
+    if (url) localStorage.setItem(KEY_PROFILE_PICTURE, url);
+    else localStorage.removeItem(KEY_PROFILE_PICTURE);
   }
 };

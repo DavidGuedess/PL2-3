@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { User as UserIcon, Calendar, Mail, Bell, LogOut, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { getMe, updateMe } from "../../api/userApi";
+import { getMe, updateMe, uploadAvatar } from "../../api/userApi";
 import type { User } from "../../models/user";
 import { routes } from "../../navigation/routes";
 import { tokenManager } from "../../storage/tokenManager";
@@ -39,13 +39,38 @@ export function ProfileScreen() {
   const [emailNotif, setEmailNotif] = useState(true);
   const [pushNotif,  setPushNotif]  = useState(true);
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSaving,  setIsSaving]  = useState(false);
-  const [error,     setError]     = useState<string | null>(null);
-  const [toast,     setToast]     = useState<string | null>(null);
+  const [isLoading,     setIsLoading]     = useState(false);
+  const [isSaving,      setIsSaving]      = useState(false);
+  const [isUploading,   setIsUploading]   = useState(false);
+  const [error,         setError]         = useState<string | null>(null);
+  const [toast,         setToast]         = useState<string | null>(null);
 
   const fallbackName  = tokenManager.getUserName() ?? "Utilizador";
   const displayName   = user?.name ?? fallbackName;
+
+  const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+
+  function avatarSrc(pic: string | null | undefined) {
+    if (!pic) return null;
+    return pic.startsWith("http") ? pic : `${API_BASE}${pic}`;
+  }
+
+  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploading(true); setError(null);
+    try {
+      const updated = await uploadAvatar(file);
+      setUser(updated);
+      tokenManager.updateProfilePicture(updated.profilePicture ?? null);
+      showToast("Foto atualizada.");
+    } catch {
+      setError("Erro ao fazer upload da foto.");
+    } finally {
+      setIsUploading(false);
+      e.target.value = "";
+    }
+  }
 
   function showToast(msg: string) {
     setToast(msg);
@@ -109,7 +134,21 @@ export function ProfileScreen() {
 
         <div className="panel-card">
           <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
-            <div className="user-avatar lg">{initials(name || displayName)}</div>
+            <label style={{ cursor: "pointer", position: "relative" }} title="Clica para alterar a foto">
+              {avatarSrc(user?.profilePicture) ? (
+                <img
+                  src={avatarSrc(user?.profilePicture)!}
+                  alt="avatar"
+                  style={{ width: 72, height: 72, borderRadius: "50%", objectFit: "cover", border: "2px solid var(--border)" }}
+                />
+              ) : (
+                <div className="user-avatar lg">{initials(name || displayName)}</div>
+              )}
+              <div style={{ position: "absolute", bottom: 0, right: 0, background: "var(--accent)", borderRadius: "50%", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>
+                {isUploading ? "…" : "✏"}
+              </div>
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleAvatarChange} disabled={isUploading} />
+            </label>
           </div>
 
           <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 0 }}>
@@ -161,7 +200,15 @@ export function ProfileScreen() {
         <>
           {/* Identity card */}
           <div className="panel-card" style={{ marginBottom: 20, display: "flex", alignItems: "center", gap: 20 }}>
-            <div className="user-avatar lg">{initials(displayName)}</div>
+            {avatarSrc(user?.profilePicture) ? (
+              <img
+                src={avatarSrc(user?.profilePicture)!}
+                alt="avatar"
+                style={{ width: 56, height: 56, borderRadius: "50%", objectFit: "cover", border: "2px solid var(--border)", flexShrink: 0 }}
+              />
+            ) : (
+              <div className="user-avatar lg">{initials(displayName)}</div>
+            )}
             <div>
               <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>{displayName}</div>
               {user && (

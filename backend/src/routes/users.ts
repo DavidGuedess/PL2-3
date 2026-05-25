@@ -5,6 +5,27 @@ import { hashPassword } from '../utils/password'
 import { authenticate, requireRole } from '../middleware/auth'
 import { validate } from '../middleware/validate'
 import { createUserSchema, updateUserMeSchema } from '../schemas'
+import multer from 'multer'
+import path from 'path'
+import fs from 'fs'
+
+const avatarStorage = multer.diskStorage({
+  destination: path.join(process.cwd(), 'uploads', 'avatars'),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase()
+    const userId = (_req as any).user?.userId ?? 'unknown'
+    cb(null, `avatar-${userId}-${Date.now()}${ext}`)
+  }
+})
+
+const uploadAvatar = multer({
+  storage: avatarStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)) cb(null, true)
+    else cb(new Error('Apenas imagens são permitidas (jpeg, png, webp, gif)'))
+  }
+})
 
 /**
  * @openapi
@@ -290,6 +311,30 @@ router.post('/', requireRole('ADMIN'), validate(createUserSchema), async (req: R
       }
     })
     return res.status(201).json(toPublic(newUser))
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.patch('/me/avatar', uploadAvatar.single('avatar'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'Nenhum ficheiro enviado' })
+
+    const user = await getAuthenticatedUser(req)
+    if (!user) return res.status(401).json({ message: 'Unauthorized' })
+
+    // delete old avatar file if it exists
+    if ((user as any).profilePicture) {
+      const oldPath = path.join(process.cwd(), 'uploads', 'avatars', path.basename((user as any).profilePicture))
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath)
+    }
+
+    const avatarUrl = `/uploads/avatars/${req.file.filename}`
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { profilePicture: avatarUrl } as any
+    })
+    return res.status(200).json(toPublic(updated))
   } catch (err) {
     next(err)
   }

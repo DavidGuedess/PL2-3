@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { createChannel, deleteChannel, getChannels, getMessages, sendMessage } from "../../api/messagingApi";
 import { getUsers } from "../../api/userApi";
+import { UserAvatar } from "../../components/UserAvatar";
 import type { Channel, ChannelMessage } from "../../models/messaging";
 import type { User } from "../../models/user";
 import { tokenManager } from "../../storage/tokenManager";
@@ -12,12 +13,29 @@ function initials(name: string) {
   return name.split(" ").filter(Boolean).slice(0, 2).map(p => p[0].toUpperCase()).join("") || "?";
 }
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+
+function avatarSrc(pic: string | null | undefined) {
+  if (!pic) return null;
+  return pic.startsWith("http") ? pic : `${API_BASE}${pic}`;
+}
+
 function fmtTime(ts: string) {
   return new Intl.DateTimeFormat("pt-PT", { hour: "2-digit", minute: "2-digit" }).format(new Date(ts));
 }
 
 function fmtDatetime(ts: string) {
   return new Intl.DateTimeFormat("pt-PT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(ts));
+}
+
+function dmOtherUser(channel: Channel, currentUserId: number, users: User[]): User | undefined {
+  const parts = channel.name.split("-");
+  if (parts.length === 3 && parts[0] === "dm") {
+    const a = Number(parts[1]), b = Number(parts[2]);
+    const otherId = a === currentUserId ? b : a;
+    return users.find(u => u.id === otherId);
+  }
+  return undefined;
 }
 
 function dmDisplayName(channel: Channel, currentUserId: number, users: User[]): string {
@@ -240,13 +258,14 @@ export function InboxScreen() {
           </div>
           {dmChannels.map(ch => {
             const displayName = dmDisplayName(ch, currentUserId, users);
+            const other = dmOtherUser(ch, currentUserId, users);
             return (
               <button
                 key={ch.id}
                 className={`channel-item${ch.id === activeId ? " active" : ""}`}
                 onClick={() => openChannel(ch.id)}
               >
-                <div className="channel-icon dm">{initials(displayName)}</div>
+                <UserAvatar name={displayName} profilePicture={other?.profilePicture} size="sm" className="channel-icon dm" />
                 <div className="channel-item-text">
                   <div className="channel-item-name">{displayName}</div>
                 </div>
@@ -268,7 +287,7 @@ export function InboxScreen() {
                 onClick={() => handleCreateDm(u.id)}
                 title={`Mensagem para ${u.name}`}
               >
-                <div className="channel-icon dm" style={{ opacity: 0.5 }}>{initials(u.name)}</div>
+                <UserAvatar name={u.name} profilePicture={u.profilePicture} size="sm" className="channel-icon dm" />
                 <div className="channel-item-text">
                   <div className="channel-item-name" style={{ color: "var(--text-faint)" }}>{u.name}</div>
                   <div className="channel-item-preview">Iniciar conversa</div>
@@ -284,9 +303,18 @@ export function InboxScreen() {
         <div className="chat-area">
           <div className="chat-header">
             <div className="chat-header-left">
-              <div className={`channel-icon ${activeChannel.type === "ANNOUNCEMENT" ? "announcement" : activeChannel.type === "DM" ? "dm" : "group"}`} style={{ width: 36, height: 36 }}>
-                {activeChannel.type === "ANNOUNCEMENT" ? <Megaphone size={16} /> : activeChannel.type === "DM" ? initials(dmDisplayName(activeChannel, currentUserId, users)) : <Users size={16} />}
-              </div>
+              {activeChannel.type === "DM" ? (
+                <UserAvatar
+                  name={dmDisplayName(activeChannel, currentUserId, users)}
+                  profilePicture={dmOtherUser(activeChannel, currentUserId, users)?.profilePicture}
+                  size="md"
+                  className="channel-icon dm"
+                />
+              ) : (
+                <div className={`channel-icon ${activeChannel.type === "ANNOUNCEMENT" ? "announcement" : "group"}`} style={{ width: 36, height: 36 }}>
+                  {activeChannel.type === "ANNOUNCEMENT" ? <Megaphone size={16} /> : <Users size={16} />}
+                </div>
+              )}
               <div>
                 <div className="chat-header-name">
                   {activeChannel.type === "DM"
@@ -313,9 +341,19 @@ export function InboxScreen() {
               {messages.map(msg => {
                 const isOwn = msg.userId === currentUserId;
                 const senderName = isOwn ? "Eu" : (msg.user?.name ?? `Utilizador #${msg.userId}`);
+                const pic = isOwn ? tokenManager.getProfilePicture() : msg.user?.profilePicture;
                 return (
                   <div key={msg.id} className={`chat-msg${isOwn ? " own" : ""}`}>
-                    <div className="msg-avatar">{initials(senderName)}</div>
+                    {avatarSrc(pic) ? (
+                      <img
+                        src={avatarSrc(pic)!}
+                        alt={senderName}
+                        className="msg-avatar"
+                        style={{ objectFit: "cover", borderRadius: "50%" }}
+                      />
+                    ) : (
+                      <div className="msg-avatar">{initials(senderName)}</div>
+                    )}
                     <div className="msg-body">
                       <div className="msg-meta">{senderName} · {fmtDatetime(msg.createdAt)}</div>
                       <div className="msg-bubble">{msg.content}</div>

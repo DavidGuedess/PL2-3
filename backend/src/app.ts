@@ -41,6 +41,7 @@ export default app */
 
 import express from 'express'
 import cors from 'cors'
+import path from 'path'
 import { runAutoClockOut } from './controllers/attendanceController'
 import usersRoutes from './routes/users'
 import authRoutes from './routes/auth'
@@ -52,6 +53,7 @@ import channelsRoutes from './routes/channels'
 import timeOffRequestsRoutes from './routes/timeOffRequests'
 import shiftSwapRequestsRoutes from './routes/shiftSwapRequests'
 import availabilityRoutes from './routes/availability'
+import activityRoutes from './routes/activity'
 import { errorHandler } from './middleware/errorHandler'
 
 const app = express()
@@ -60,8 +62,10 @@ app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://localhost:5174',
+    'http://localhost:5175',
     'http://127.0.0.1:5173',
     'http://127.0.0.1:5174',
+    'http://127.0.0.1:5175',
     'http://192.168.0.30:5173'
   ],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -72,6 +76,7 @@ app.use(cors({
 app.options('*', cors())
 
 app.use(express.json())
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')))
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'MiawGenda API' })
