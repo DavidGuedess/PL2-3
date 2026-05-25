@@ -1,4 +1,5 @@
 import { useLocation, useNavigate, Outlet } from "react-router-dom";
+import { useState, useEffect } from "react";
 import { Home, Calendar, MessageSquare, Users, BarChart2, Bell, LogOut, PawPrint, PieChart } from "lucide-react";
 import { routes } from "../navigation/routes";
 import { tokenManager } from "../storage/tokenManager";
@@ -13,12 +14,21 @@ const NAV_ITEMS = [
   { path: routes.notifications,  Icon: Bell,          label: "Notificações" },
 ];
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+
 export function AppLayout() {
   const location  = useLocation();
   const navigate  = useNavigate();
   const name      = tokenManager.getUserName() ?? "Utilizador";
   const firstName = name.split(" ")[0] ?? "Utilizador";
   const initial   = firstName.charAt(0).toUpperCase();
+
+  const [profilePicture, setProfilePicture] = useState<string | null>(tokenManager.getProfilePicture());
+
+  // Refresh avatar when returning to layout (e.g. after upload in ProfileScreen)
+  useEffect(() => {
+    setProfilePicture(tokenManager.getProfilePicture());
+  }, [location.pathname]);
 
   function handleLogout() {
     tokenManager.clearTokens();
@@ -53,7 +63,15 @@ export function AppLayout() {
             className={`sidebar-item${location.pathname === routes.profile ? " active" : ""}`}
             onClick={() => navigate(routes.profile)}
           >
-            <div className="sidebar-avatar">{initial}</div>
+            {profilePicture ? (
+              <img
+                src={profilePicture.startsWith("http") ? profilePicture : `${API_BASE}${profilePicture}`}
+                alt="avatar"
+                style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
+              />
+            ) : (
+              <div className="sidebar-avatar">{initial}</div>
+            )}
             <span style={{ flex: 1, textAlign: "left", fontSize: 13, color: "var(--text)" }}>{firstName}</span>
           </button>
           <button className="sidebar-item" onClick={handleLogout}>

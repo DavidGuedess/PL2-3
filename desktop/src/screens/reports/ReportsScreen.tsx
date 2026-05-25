@@ -8,6 +8,7 @@ import { ChevronLeft, ChevronRight, RefreshCw, Info } from "lucide-react";
 import { getShifts, getMyShifts } from "../../api/shiftApi";
 import { getAttendance, getMyAttendanceHistory } from "../../api/attendanceApi";
 import { getUsers } from "../../api/userApi";
+import { UserAvatar } from "../../components/UserAvatar";
 import { resolvedStartTime, resolvedEndTime } from "../../models/shift";
 import type { Shift } from "../../models/shift";
 import type { AttendanceRecord } from "../../models/attendance";
@@ -159,11 +160,11 @@ export function ReportsScreen() {
   // per-employee summary table
   const employeeSummary = useMemo(() => {
     if (!canManage || selUserId !== "all") return [];
-    const byUser = new Map<number, { name: string; empNum: string; programmed: number; real: number; onTime: number; total: number }>();
+    const byUser = new Map<number, { name: string; empNum: string; profilePicture: string | null; programmed: number; real: number; onTime: number; total: number }>();
     for (const s of publishedShifts) {
       if (!byUser.has(s.userId)) {
         const u = users.find(x => x.id === s.userId);
-        byUser.set(s.userId, { name: u?.name ?? `#${s.userId}`, empNum: u?.employeeNumber ?? "", programmed: 0, real: 0, onTime: 0, total: 0 });
+        byUser.set(s.userId, { name: u?.name ?? `#${s.userId}`, empNum: u?.employeeNumber ?? "", profilePicture: u?.profilePicture ?? null, programmed: 0, real: 0, onTime: 0, total: 0 });
       }
       const entry = byUser.get(s.userId)!;
       entry.programmed += shiftDurationH(s);
@@ -173,7 +174,7 @@ export function ReportsScreen() {
     for (const r of records) {
       if (!byUser.has(r.userId)) {
         const u = users.find(x => x.id === r.userId);
-        byUser.set(r.userId, { name: u?.name ?? `#${r.userId}`, empNum: u?.employeeNumber ?? "", programmed: 0, real: 0, onTime: 0, total: 0 });
+        byUser.set(r.userId, { name: u?.name ?? `#${r.userId}`, empNum: u?.employeeNumber ?? "", profilePicture: u?.profilePicture ?? null, programmed: 0, real: 0, onTime: 0, total: 0 });
       }
     }
     for (const day of weekDays) {
@@ -212,7 +213,7 @@ export function ReportsScreen() {
                 onClick={() => setSelUserId(u.id)}
                 style={{ borderRadius: 6, marginBottom: 2 }}
               >
-                <div className="user-avatar sm">{u.name.charAt(0)}</div>
+                <UserAvatar name={u.name} profilePicture={u.profilePicture} size="sm" />
                 <div>
                   <div className="dir-item-name">{u.name}</div>
                   <div className="dir-item-sub">{u.employeeNumber}</div>
@@ -413,7 +414,7 @@ export function ReportsScreen() {
                       <tr key={row.empNum} style={{ cursor: "default" }}>
                         <td>
                           <div className="user-cell">
-                            <div className="user-avatar sm">{row.name.charAt(0)}</div>
+                            <UserAvatar name={row.name} profilePicture={row.profilePicture} size="sm" />
                             <div className="user-info">
                               <strong>{row.name}</strong>
                               <span>{row.empNum}</span>

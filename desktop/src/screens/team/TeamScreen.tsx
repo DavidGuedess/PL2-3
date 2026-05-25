@@ -3,6 +3,7 @@ import { X, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { activateUser, deactivateUser, getUsers, updateUser } from "../../api/userApi";
+import { UserAvatar } from "../../components/UserAvatar";
 import { getTimeOffRequests } from "../../api/requestApi";
 import type { User } from "../../models/user";
 import type { TimeOffRequest } from "../../models/request";
@@ -209,7 +210,7 @@ export function TeamScreen() {
               <tr key={user.id} onClick={() => { setSelected(user); setShowEdit(false); setShowVacations(false); }}>
                 <td>
                   <div className="user-cell">
-                    <div className="user-avatar">{initials(user.name)}</div>
+                    <UserAvatar name={user.name} profilePicture={user.profilePicture} />
                     <div className="user-info">
                       <strong>{user.name} {user.id === currentId && <span style={{ fontSize: 11, color: "var(--accent)" }}>(você)</span>}</strong>
                       <span>{user.email}</span>
@@ -260,7 +261,7 @@ export function TeamScreen() {
           <div className="detail-panel">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div className="detail-panel-header">
-                <div className="user-avatar lg">{initials(selected.name)}</div>
+                <UserAvatar name={selected.name} profilePicture={selected.profilePicture} size="lg" />
                 <div className="detail-panel-name">
                   <h2>{selected.name}</h2>
                   <span>{selected.employeeNumber}</span>

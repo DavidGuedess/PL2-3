@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "dev": "concurrently --names BACKEND,DESKTOP --prefix-colors cyan,green \"npm --prefix backend run dev\" \"npm --prefix desktop run dev\"",
+    "backend": "npm --prefix backend run dev",
+    "desktop": "npm --prefix desktop run dev"
+  },
   "dependencies": {
     "@prisma/client": "^7.7.0",
     "axios": "^1.16.1",
@@ -17,6 +22,7 @@
     "@types/supertest": "^7.2.0",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^9.2.1",
     "jest": "^30.3.0",
     "prisma": "^7.7.0",
     "supertest": "^7.2.2",
