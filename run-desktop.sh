@@ -125,4 +125,4 @@ echo -e "  ${GRAY}  EMP003 / password123  — Manager     (Gerente 1)${NC}"
 echo -e "  ${GRAY}  EMP004 / password123  — Manager     (Gerente 2)${NC}"
 echo ""
 
-npm run dev -- --open
+npm run electron:dev
