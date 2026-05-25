@@ -53,6 +53,7 @@ import timeOffRequestsRoutes from './routes/timeOffRequests'
 import shiftSwapRequestsRoutes from './routes/shiftSwapRequests'
 import availabilityRoutes from './routes/availability'
 import { errorHandler } from './middleware/errorHandler'
+import activityRoutes from './routes/activity'
 
 const app = express()
 
