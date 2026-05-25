@@ -7,6 +7,79 @@ const prisma = new PrismaClient()
 
 const router = Router()
 
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     Availability:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *         userId:
+ *           type: integer
+ *         date:
+ *           type: string
+ *           format: date
+ *         type:
+ *           type: string
+ *           enum: [PREFERRED, UNAVAILABLE]
+ *         note:
+ *           type: string
+ *           nullable: true
+ *         user:
+ *           type: object
+ *           properties:
+ *             id:
+ *               type: integer
+ *             name:
+ *               type: string
+ *             employeeNumber:
+ *               type: string
+ *     CreateAvailabilityInput:
+ *       type: object
+ *       required: [date, type]
+ *       properties:
+ *         date:
+ *           type: string
+ *           format: date
+ *           example: "2026-03-25"
+ *         type:
+ *           type: string
+ *           enum: [PREFERRED, UNAVAILABLE]
+ *         note:
+ *           type: string
+ */
+
+/**
+ * @openapi
+ * /availability:
+ *   get:
+ *     summary: Listar disponibilidades (próprias para EMPLOYEE, todas para Admin/Gestor)
+ *     tags: [Disponibilidades]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *     responses:
+ *       200:
+ *         description: Lista de disponibilidades
+ *       401:
+ *         description: Não autenticado
+ */
 // GET /availability - ADMIN/MANAGER see all, EMPLOYEE sees own
 router.get('/', authenticate, async (req, res, next) => {
   try {
@@ -39,6 +112,28 @@ router.get('/', authenticate, async (req, res, next) => {
   }
 })
 
+/**
+ * @openapi
+ * /availability:
+ *   post:
+ *     summary: Definir a própria disponibilidade numa data (cria ou atualiza)
+ *     tags: [Disponibilidades]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateAvailabilityInput'
+ *     responses:
+ *       201:
+ *         description: Disponibilidade registada
+ *       400:
+ *         description: Dados inválidos
+ *       401:
+ *         description: Não autenticado
+ */
 // POST /availability - any authenticated user (creates/updates own availability)
 router.post('/', authenticate, async (req, res, next) => {
   try {
@@ -63,6 +158,30 @@ router.post('/', authenticate, async (req, res, next) => {
   }
 })
 
+/**
+ * @openapi
+ * /availability/{id}:
+ *   delete:
+ *     summary: Remover uma disponibilidade (própria ou Admin/Gestor)
+ *     tags: [Disponibilidades]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       204:
+ *         description: Disponibilidade removida
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão
+ *       404:
+ *         description: Disponibilidade não encontrada
+ */
 // DELETE /availability/:id - own record or ADMIN/MANAGER
 router.delete('/:id', authenticate, async (req, res, next) => {
   try {
