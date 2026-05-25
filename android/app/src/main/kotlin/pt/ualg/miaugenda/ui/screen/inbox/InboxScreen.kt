@@ -83,6 +83,9 @@ private sealed class InboxSubScreen {
     ) : InboxSubScreen()
 }
 
+private const val MESSAGE_REFRESH_MS = 1000L
+private const val INBOX_REFRESH_MS = 1000L
+
 @Composable
 fun InboxScreen(
     onSchedulerClick: () -> Unit = {},
@@ -164,12 +167,17 @@ private fun InboxMain(
     var errorMsg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    fun reload() {
+    fun reload(showLoading: Boolean = false) {
         scope.launch {
-            isLoading = true
+            if (showLoading) {
+                isLoading = true
+            }
+
             errorMsg = null
+
             try {
                 val resp = RetrofitClient.messagingApi.getChannels()
+
                 when {
                     resp.isSuccessful -> channels = resp.body().orEmpty()
                     resp.code() == 401 -> errorMsg = "Sessão expirada. Faz login novamente."
@@ -178,12 +186,21 @@ private fun InboxMain(
             } catch (e: Exception) {
                 errorMsg = "Sem ligação ao servidor"
             } finally {
-                isLoading = false
+                if (showLoading) {
+                    isLoading = false
+                }
             }
         }
     }
 
-    LaunchedEffect(Unit) { reload() }
+    LaunchedEffect(Unit) {
+        reload(showLoading = true)
+
+        while (true) {
+            delay(INBOX_REFRESH_MS)
+            reload(showLoading = false)
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -728,7 +745,7 @@ private fun ChatRoomScreen(
     LaunchedEffect(channelId) {
         loadMessages()
         while (true) {
-            delay(5000)
+            delay(1000)
             loadMessages()
         }
     }
