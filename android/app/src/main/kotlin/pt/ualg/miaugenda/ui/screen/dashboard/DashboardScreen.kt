@@ -128,8 +128,13 @@ fun DashboardScreen(
     val today      = LocalDate.now()
     val weekStart  = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
     LaunchedEffect(weekStart) {
-        viewModel.loadWeekShifts(weekStart)
-        viewModel.loadMyRequests()
+        while (true) {
+            viewModel.loadWeekShifts(weekStart)
+            viewModel.loadTodayAttendance()
+            viewModel.loadMyRequests()
+
+            delay(3_000)
+        }
     }
 
     var subScreen by remember { mutableStateOf(SubScreen.Home) }
@@ -195,7 +200,11 @@ fun DashboardScreen(
                 },
                 onCancel = { subScreen = SubScreen.Home },
                 onFinish = { note ->
-                    viewModel.clockOut(note) { subScreen = SubScreen.Home }
+                    viewModel.clockOut(note) { success ->
+                        if (success) {
+                            subScreen = SubScreen.Home
+                        }
+                    }
                 }
             )
         }
@@ -228,10 +237,32 @@ private fun HomeScreen(
 ) {
     var fabOpen by remember { mutableStateOf(false) }
 
+    // Minute-ticker para recalcular janela de registo de ponto
+    var currentTime by remember { mutableStateOf(LocalTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) { delay(30_000); currentTime = LocalTime.now() }
+    }
+
     // Só turnos PUBLICADOS contam para o registo de ponto
-    val todayShift = remember(shifts, today) {
+    val todayShift = remember(shifts, today, currentTime) {
         shifts.firstOrNull { s ->
-            LocalDate.parse(s.date.substring(0, 10)) == today && s.published
+            if (!s.published) return@firstOrNull false
+
+            val shiftDate = runCatching {
+                LocalDate.parse(s.date.substring(0, 10))
+            }.getOrNull() ?: return@firstOrNull false
+
+            val start = runCatching {
+                LocalTime.parse(s.resolvedStartTime())
+            }.getOrNull() ?: return@firstOrNull false
+
+            val end = runCatching {
+                LocalTime.parse(s.resolvedEndTime())
+            }.getOrNull() ?: return@firstOrNull false
+
+            val isOvernight = end.isBefore(start) || end == start
+
+            shiftDate == today || (isOvernight && shiftDate == today.minusDays(1))
         }
     }
 
@@ -272,11 +303,7 @@ private fun HomeScreen(
         "%02d:%02d:%02d", clockedInSec / 3600, (clockedInSec % 3600) / 60, clockedInSec % 60
     )
 
-    // Minute-ticker para recalcular janela de registo de ponto
-    var currentTime by remember { mutableStateOf(LocalTime.now()) }
-    LaunchedEffect(Unit) {
-        while (true) { delay(30_000); currentTime = LocalTime.now() }
-    }
+
 
     // Dynamic greeting
     val greetingWord = when (currentTime.hour) {
@@ -289,17 +316,37 @@ private fun HomeScreen(
     //   - Se estiver clocked-in (enquanto não chegar auto-saída do backend)
     //   - Se existir turno hoje E estiver dentro da janela [start-15min, end+15min]
     val showClockSection = when {
-        isClocked -> {
-            val shiftEnd = todayShift?.let { runCatching { LocalTime.parse(it.resolvedEndTime()) }.getOrNull() }
-            shiftEnd == null || currentTime.isBefore(shiftEnd.plusMinutes(15))
-        }
+        isClocked -> true
+
         todayShift != null -> {
-            val shiftStart = runCatching { LocalTime.parse(todayShift.resolvedStartTime()) }.getOrNull()
-            val shiftEnd   = runCatching { LocalTime.parse(todayShift.resolvedEndTime()) }.getOrNull()
-            val tooEarly   = shiftStart != null && currentTime.isBefore(shiftStart.minusMinutes(15))
-            val tooLate    = shiftEnd   != null && currentTime.isAfter(shiftEnd.plusMinutes(15))
-            !tooEarly && !tooLate
+            val shiftStart = runCatching {
+                LocalTime.parse(todayShift.resolvedStartTime())
+            }.getOrNull()
+
+            val shiftEnd = runCatching {
+                LocalTime.parse(todayShift.resolvedEndTime())
+            }.getOrNull()
+
+            if (shiftStart == null || shiftEnd == null) {
+                false
+            } else {
+                val startsBeforeEnds = shiftEnd.isAfter(shiftStart)
+
+                if (startsBeforeEnds) {
+                    // Turno normal: 09:00 - 17:00
+                    val tooEarly = currentTime.isBefore(shiftStart.minusMinutes(15))
+                    val tooLate = currentTime.isAfter(shiftEnd.plusMinutes(15))
+                    !tooEarly && !tooLate
+                } else {
+                    // Turno overnight: 22:50 - 05:00
+                    val afterStart = !currentTime.isBefore(shiftStart.minusMinutes(15))
+                    val beforeEnd = !currentTime.isAfter(shiftEnd.plusMinutes(15))
+
+                    afterStart || beforeEnd
+                }
+            }
         }
+
         else -> false
     }
 

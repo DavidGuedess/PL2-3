@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Clock,
   Coffee,
@@ -26,27 +26,35 @@ import type { AttendanceRecord } from "../../models/attendance";
 import { routes } from "../../navigation/routes";
 import { tokenManager } from "../../storage/tokenManager";
 
+function localDateString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
 function getToday() {
-  return new Date().toISOString().slice(0, 10);
+  return localDateString(new Date());
 }
 
 function mondayOf(date: Date): string {
   const d = new Date(date);
   const day = d.getDay();
   d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
-  return d.toISOString().slice(0, 10);
+  return localDateString(d);
 }
 
 function addWeeks(base: string, n: number): string {
-  const d = new Date(base);
+  const d = new Date(base + "T12:00:00");
   d.setDate(d.getDate() + n * 7);
-  return d.toISOString().slice(0, 10);
+  return localDateString(d);
 }
 
 function weekEnd(start: string): string {
-  const d = new Date(start);
+  const d = new Date(start + "T12:00:00");
   d.setDate(d.getDate() + 6);
-  return d.toISOString().slice(0, 10);
+  return localDateString(d);
 }
 
 function fmtWeek(start: string): string {
@@ -79,16 +87,18 @@ function greeting() {
   return "Boa noite";
 }
 
-function calcWorked(records: AttendanceRecord[]): string {
-  const today = getToday();
+function calcWorked(records: AttendanceRecord[], today: string): string {
   const sorted = records
-    .filter((r) => r.timestamp.slice(0, 10) === today)
+    .filter((r) => localDateString(new Date(r.timestamp)) === today)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  let mins = 0,
-    lastIn: string | null = null;
+
+  let mins = 0;
+  let lastIn: string | null = null;
+
   for (const r of sorted) {
-    if (r.type === "IN") lastIn = r.timestamp;
-    else if (r.type === "OUT" && lastIn) {
+    if (r.type === "IN") {
+      lastIn = r.timestamp;
+    } else if (r.type === "OUT" && lastIn) {
       mins += Math.max(
         0,
         Math.floor(
@@ -99,8 +109,10 @@ function calcWorked(records: AttendanceRecord[]): string {
       lastIn = null;
     }
   }
-  const h = Math.floor(mins / 60),
-    m = mins % 60;
+
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+
   if (h > 0) return `${h}h ${m}min`;
   if (m > 0) return `${m}min`;
   return "—";
@@ -131,13 +143,32 @@ function addMinutes(date: Date, minutes: number): Date {
   return d;
 }
 
+function dateOnly(date: Date): string {
+  return localDateString(date);
+}
+
+function parseShiftDateTime(date: string, time: string): Date | null {
+  const [h, m] = time.slice(0, 5).split(":").map(Number);
+
+  if (Number.isNaN(h) || Number.isNaN(m)) {
+    return null;
+  }
+
+  const d = new Date(date.slice(0, 10) + "T12:00:00");
+  d.setHours(h, m, 0, 0);
+
+  return d;
+}
+
 export function DashboardScreen() {
   const navigate = useNavigate();
   const userId = tokenManager.getUserId();
   const name = tokenManager.getUserName() ?? "Utilizador";
   const firstName = name.split(" ")[0];
 
-  const today = getToday();
+  const [now, setNow] = useState(new Date());
+  const today = useMemo(() => localDateString(now), [now]);
+
   const [weekStart, setWeekStart] = useState(mondayOf(new Date()));
 
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -147,64 +178,129 @@ export function DashboardScreen() {
   const [swaps, setSwaps] = useState<ShiftSwapRequest[]>([]);
   const [allWeekCount, setAllWeekCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [now, setNow] = useState(new Date());
 
   const wEnd = weekEnd(weekStart);
 
-  async function load() {
-    setIsLoading(true);
-    try {
-      const [s, allS, att, active, tor, ssr] = await Promise.allSettled([
-        getMyShifts({ week: weekStart }),
-        getShifts({ week: weekStart }),
-        getMyAttendanceHistory({ from: weekStart, to: wEnd }),
-        getActiveEmployees(),
-        getTimeOffRequests(),
-        getShiftSwapRequests(),
-      ]);
-      setShifts(s.status === "fulfilled" ? s.value : []);
-      setAllWeekCount(
-        allS.status === "fulfilled"
-          ? allS.value.filter((x) => x.published).length
-          : 0,
-      );
-      setAttendance(att.status === "fulfilled" ? att.value : []);
-      setActiveCount(active.status === "fulfilled" ? active.value.length : 0);
-      setTimeOffs(tor.status === "fulfilled" ? tor.value : []);
-      setSwaps(ssr.status === "fulfilled" ? ssr.value : []);
-    } finally {
-      setIsLoading(false);
-    }
-  }
+  const load = useCallback(
+    async (showLoading = true) => {
+      if (showLoading) {
+        setIsLoading(true);
+      }
+
+      try {
+        const weekEndDate = weekEnd(weekStart);
+
+        const [s, allS, att, active, tor, ssr] = await Promise.allSettled([
+          getMyShifts({ week: weekStart }),
+          getShifts({ week: weekStart }),
+          getMyAttendanceHistory({ from: weekStart, to: weekEndDate }),
+          getActiveEmployees(),
+          getTimeOffRequests(),
+          getShiftSwapRequests(),
+        ]);
+
+        setShifts(s.status === "fulfilled" ? s.value : []);
+
+        setAllWeekCount(
+          allS.status === "fulfilled"
+            ? allS.value.filter((x) => x.published).length
+            : 0,
+        );
+
+        setAttendance(att.status === "fulfilled" ? att.value : []);
+        setActiveCount(active.status === "fulfilled" ? active.value.length : 0);
+        setTimeOffs(tor.status === "fulfilled" ? tor.value : []);
+        setSwaps(ssr.status === "fulfilled" ? ssr.value : []);
+      } catch (error) {
+        console.error("Erro ao atualizar dashboard:", error);
+      } finally {
+        if (showLoading) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [weekStart],
+  );
 
   useEffect(() => {
-    void load();
-  }, [weekStart]);
+    void load(true);
+
+    const intervalId = window.setInterval(() => {
+      console.log("Refreshing dashboard...");
+      void load(false);
+    }, 3_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [load]);
 
   useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 30_000);
+    const id = window.setInterval(() => {
+      setNow(new Date());
+    }, 1_000);
+
     return () => window.clearInterval(id);
   }, []);
 
-  const todayShift = useMemo(
-    () =>
-      shifts.find((s) => s.published && s.date.slice(0, 10) === today) ?? null,
-    [shifts, today],
-  );
+  const todayShift = useMemo(() => {
+    const yesterdayDate = new Date(today + "T12:00:00");
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterday = dateOnly(yesterdayDate);
+
+    return (
+      shifts.find((s) => {
+        if (!s.published) {
+          return false;
+        }
+
+        const shiftDate = s.date.slice(0, 10);
+        const start = resolvedStartTime(s);
+        const end = resolvedEndTime(s);
+
+        const startDate = parseShiftDateTime(shiftDate, start);
+        const endDate = parseShiftDateTime(shiftDate, end);
+
+        if (!startDate || !endDate) {
+          return false;
+        }
+
+        const isOvernight = endDate <= startDate;
+
+        return shiftDate === today || (isOvernight && shiftDate === yesterday);
+      }) ?? null
+    );
+  }, [shifts, today]);
 
   const canRegisterPoint = useMemo(() => {
     if (!todayShift) {
       return false;
     }
 
-    const shiftStart = parseTodayTime(resolvedStartTime(todayShift));
-    const shiftEnd = parseTodayTime(resolvedEndTime(todayShift));
+    const shiftDate = todayShift.date.slice(0, 10);
+
+    const shiftStart = parseShiftDateTime(
+      shiftDate,
+      resolvedStartTime(todayShift),
+    );
+
+    let shiftEnd = parseShiftDateTime(shiftDate, resolvedEndTime(todayShift));
 
     if (!shiftStart || !shiftEnd) {
       return false;
     }
 
-    return now >= shiftStart && now <= addMinutes(shiftEnd, 15);
+    const isOvernight = shiftEnd <= shiftStart;
+
+    if (isOvernight) {
+      shiftEnd = new Date(shiftEnd);
+      shiftEnd.setDate(shiftEnd.getDate() + 1);
+    }
+
+    const windowStart = addMinutes(shiftStart, -15);
+    const windowEnd = addMinutes(shiftEnd, 15);
+
+    return now >= windowStart && now <= windowEnd;
   }, [todayShift, now]);
 
   const publishedWeekShifts = useMemo(
@@ -228,7 +324,7 @@ export function DashboardScreen() {
       new Date(r.endDate) >= new Date(today),
   ).length;
 
-  const worked = calcWorked(attendance);
+  const worked = calcWorked(attendance, today);
 
   return (
     <>
