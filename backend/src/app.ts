@@ -55,7 +55,6 @@ import shiftSwapRequestsRoutes from './routes/shiftSwapRequests'
 import availabilityRoutes from './routes/availability'
 import activityRoutes from './routes/activity'
 import { errorHandler } from './middleware/errorHandler'
-import activityRoutes from './routes/activity'
 
 const app = express()
 
