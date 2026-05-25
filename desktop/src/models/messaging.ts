@@ -1,6 +1,7 @@
 export interface MessageSender {
   id: number;
   name: string;
+  profilePicture: string | null;
 }
 
 export interface ChannelMessage {

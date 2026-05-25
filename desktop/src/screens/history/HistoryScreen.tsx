@@ -5,6 +5,7 @@ import { getAttendance, getMyAttendanceHistory } from "../../api/attendanceApi";
 import { getTimeOffRequests, getShiftSwapRequests } from "../../api/requestApi";
 import { getActivity } from "../../api/activityApi";
 import { getUsers } from "../../api/userApi";
+import { UserAvatar } from "../../components/UserAvatar";
 import type { AttendanceRecord } from "../../models/attendance";
 import type { TimeOffRequest, ShiftSwapRequest } from "../../models/request";
 import type { ActivityItem } from "../../api/activityApi";
@@ -203,7 +204,7 @@ export function HistoryScreen() {
                 <div className="dir-letter">{letter}</div>
                 {group.map(u => (
                   <button key={u.id} className={`dir-item${u.id === selectedId ? " active" : ""}`} onClick={() => setSelectedId(u.id)}>
-                    <div className="user-avatar sm">{initials(u.name)}</div>
+                    <UserAvatar name={u.name} profilePicture={u.profilePicture} size="sm" />
                     <div><div className="dir-item-name">{u.name}</div><div className="dir-item-sub">{u.employeeNumber}</div></div>
                   </button>
                 ))}
@@ -221,7 +222,7 @@ export function HistoryScreen() {
           <div className="history-employee-head">
             {selectedUser && (
               <>
-                <div className="user-avatar">{initials(selectedUser.name)}</div>
+                <UserAvatar name={selectedUser.name} profilePicture={(selectedUser as any).profilePicture} />
                 <h2>{selectedUser.name}</h2>
               </>
             )}

@@ -11,6 +11,11 @@ export async function getUsers(): Promise<User[]> {
   return response.data;
 }
 
+export async function getColleagues(): Promise<Pick<User, "id" | "employeeNumber" | "name" | "role" | "category" | "profilePicture">[]> {
+  const response = await apiClient.get("/users/colleagues");
+  return response.data;
+}
+
 export async function getMe(): Promise<User> {
   const response = await apiClient.get<User>("/users/me");
   return response.data;
@@ -38,5 +43,14 @@ export async function deactivateUser(id: number): Promise<User> {
 
 export async function activateUser(id: number): Promise<User> {
   const response = await apiClient.patch<User>(`/users/${id}/activate`);
+  return response.data;
+}
+
+export async function uploadAvatar(file: File): Promise<User> {
+  const form = new FormData();
+  form.append("avatar", file);
+  const response = await apiClient.patch<User>("/users/me/avatar", form, {
+    headers: { "Content-Type": "multipart/form-data" }
+  });
   return response.data;
 }

@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { X, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { activateUser, createUser, deactivateUser, getUsers, updateUser } from "../../api/userApi";
+import { activateUser, createUser, deactivateUser, getColleagues, getUsers, updateUser } from "../../api/userApi";
+import { UserAvatar } from "../../components/UserAvatar";
 import { getTimeOffRequests } from "../../api/requestApi";
 import type { User } from "../../models/user";
 import type { TimeOffRequest } from "../../models/request";
@@ -37,7 +38,7 @@ export function TeamScreen() {
   const role      = tokenManager.getUserRole() ?? "EMPLOYEE";
   const isAdmin   = role === "ADMIN";
   const isManager = role === "MANAGER";
-  const canView   = isAdmin || isManager;
+  const isEmployee = role === "EMPLOYEE";
   const currentId = tokenManager.getUserId();
 
   const [users,        setUsers]        = useState<User[]>([]);
@@ -69,12 +70,16 @@ export function TeamScreen() {
   }
 
   async function loadAll() {
-    if (!canView) return;
     setIsLoading(true); setError(null);
     try {
-      const [u, tor] = await Promise.allSettled([getUsers(), getTimeOffRequests()]);
-      if (u.status   === "fulfilled") setUsers(u.value);
-      if (tor.status === "fulfilled") setTimeOffs(tor.value);
+      if (isEmployee) {
+        const u = await getColleagues();
+        setUsers(u as User[]);
+      } else {
+        const [u, tor] = await Promise.allSettled([getUsers(), getTimeOffRequests()]);
+        if (u.status   === "fulfilled") setUsers(u.value);
+        if (tor.status === "fulfilled") setTimeOffs(tor.value);
+      }
     } catch (e) {
       setError(getBackendErrorMessage(e, "Erro ao carregar equipa"));
     } finally {
@@ -172,17 +177,6 @@ export function TeamScreen() {
     }
   }
 
-  if (!canView) {
-    return (
-      <div className="team-page">
-        <div className="page-header"><h1>Equipa</h1></div>
-        <div className="panel-card">
-          <p className="muted-text">Não tens permissão para ver a equipa.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="team-page">
       <div className="page-header">
@@ -194,14 +188,16 @@ export function TeamScreen() {
         )}
       </div>
 
-      <div className="page-tabs">
-        <button className={`page-tab${tab === "active" ? " active" : ""}`} onClick={() => setTab("active")}>
-          Ativo
-        </button>
-        <button className={`page-tab${tab === "archived" ? " active" : ""}`} onClick={() => setTab("archived")}>
-          Arquivado
-        </button>
-      </div>
+      {!isEmployee && (
+        <div className="page-tabs">
+          <button className={`page-tab${tab === "active" ? " active" : ""}`} onClick={() => setTab("active")}>
+            Ativo
+          </button>
+          <button className={`page-tab${tab === "archived" ? " active" : ""}`} onClick={() => setTab("archived")}>
+            Arquivado
+          </button>
+        </div>
+      )}
 
       <div className="page-toolbar">
         <input
@@ -238,7 +234,7 @@ export function TeamScreen() {
               <tr key={user.id} onClick={() => { setSelected(user); setShowEdit(false); setShowVacations(false); }}>
                 <td>
                   <div className="user-cell">
-                    <div className="user-avatar">{initials(user.name)}</div>
+                    <UserAvatar name={user.name} profilePicture={user.profilePicture} />
                     <div className="user-info">
                       <strong>{user.name} {user.id === currentId && <span style={{ fontSize: 11, color: "var(--accent)" }}>(você)</span>}</strong>
                       <span>{user.email}</span>
@@ -264,9 +260,11 @@ export function TeamScreen() {
                         Editar
                       </button>
                     )}
-                    <button className="btn btn-ghost btn-sm" onClick={() => navigate(`${routes.inbox}?dm=${user.id}`)}>
-                      Mensagem
-                    </button>
+                    {user.id !== currentId && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => navigate(`${routes.inbox}?dm=${user.id}`)}>
+                        Mensagem
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -289,7 +287,7 @@ export function TeamScreen() {
           <div className="detail-panel">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div className="detail-panel-header">
-                <div className="user-avatar lg">{initials(selected.name)}</div>
+                <UserAvatar name={selected.name} profilePicture={selected.profilePicture} size="lg" />
                 <div className="detail-panel-name">
                   <h2>{selected.name}</h2>
                   <span>{selected.employeeNumber}</span>
@@ -299,7 +297,7 @@ export function TeamScreen() {
             </div>
 
             <div className="detail-info-list">
-              {(isAdmin || isManager) && (
+              {!isEmployee && (
                 <>
                   <div className="detail-info-row"><span>Email</span><strong>{selected.email}</strong></div>
                   <div className="detail-info-row"><span>Contacto</span><strong>{selected.contact ?? "—"}</strong></div>
