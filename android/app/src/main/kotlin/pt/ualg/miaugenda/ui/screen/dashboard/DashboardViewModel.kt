@@ -93,12 +93,17 @@ class DashboardViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val r = RetrofitClient.attendanceApi.register(CreateAttendanceBody(type = "IN"))
+
                 if (r.isSuccessful) {
                     val record = r.body()
+
                     _uiState.value = _uiState.value.copy(
-                        isClocked      = true,
+                        isClocked = true,
                         clockedInSince = record?.timestamp
                     )
+
+                    loadTodayAttendance()
+
                     onResult(true)
                 } else {
                     onResult(false)
@@ -115,11 +120,15 @@ class DashboardViewModel : ViewModel() {
                 val r = RetrofitClient.attendanceApi.register(
                     CreateAttendanceBody(type = "OUT", note = note.ifBlank { null })
                 )
+
                 if (r.isSuccessful) {
                     _uiState.value = _uiState.value.copy(
-                        isClocked      = false,
+                        isClocked = false,
                         clockedInSince = null
                     )
+
+                    loadTodayAttendance()
+
                     onResult(true)
                 } else {
                     onResult(false)
