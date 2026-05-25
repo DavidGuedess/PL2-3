@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { X, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { activateUser, deactivateUser, getColleagues, getUsers, updateUser } from "../../api/userApi";
+import { activateUser, createUser, deactivateUser, getColleagues, getUsers, updateUser } from "../../api/userApi";
 import { UserAvatar } from "../../components/UserAvatar";
 import { getTimeOffRequests } from "../../api/requestApi";
 import type { User } from "../../models/user";
@@ -56,6 +56,11 @@ export function TeamScreen() {
   const [editForm,     setEditForm]     = useState({ name: "", email: "", contact: "", role: "", category: "" });
   const [isSaving,     setIsSaving]     = useState(false);
 
+  // Create panel state
+  const [showCreate,   setShowCreate]   = useState(false);
+  const [createForm,   setCreateForm]   = useState({ employeeNumber: "", name: "", email: "", contact: "", password: "", role: "EMPLOYEE", category: "VETERINARIAN" });
+  const [isCreating,   setIsCreating]   = useState(false);
+
   // Vacations panel state
   const [showVacations, setShowVacations] = useState(false);
 
@@ -102,6 +107,30 @@ export function TeamScreen() {
       setError(getBackendErrorMessage(e, "Erro ao alterar estado."));
     } finally {
       setIsActLoading(false);
+    }
+  }
+
+  async function handleCreateSubmit(e: FormEvent) {
+    e.preventDefault();
+    setIsCreating(true); setError(null);
+    try {
+      const created = await createUser({
+        employeeNumber: createForm.employeeNumber.trim(),
+        name:           createForm.name.trim(),
+        email:          createForm.email.trim(),
+        contact:        createForm.contact.trim() || null,
+        password:       createForm.password,
+        role:           createForm.role,
+        category:       createForm.category,
+      });
+      setUsers(prev => [...prev, created]);
+      setShowCreate(false);
+      setCreateForm({ employeeNumber: "", name: "", email: "", contact: "", password: "", role: "EMPLOYEE", category: "VETERINARIAN" });
+      showToast("Funcionário criado com sucesso.");
+    } catch (e) {
+      setError(getBackendErrorMessage(e, "Erro ao criar funcionário."));
+    } finally {
+      setIsCreating(false);
     }
   }
 
@@ -153,7 +182,7 @@ export function TeamScreen() {
       <div className="page-header">
         <h1>Pessoas</h1>
         {isAdmin && (
-          <button className="btn btn-primary" onClick={() => navigate(routes.profile)}>
+          <button className="btn btn-primary" onClick={() => { setShowCreate(true); setError(null); }}>
             + Novo Membro
           </button>
         )}
@@ -400,6 +429,93 @@ export function TeamScreen() {
                 ))}
               </div>
             )}
+          </div>
+        </>
+      )}
+
+      {/* Create panel */}
+      {showCreate && (
+        <>
+          <div className="detail-overlay" onClick={() => { setShowCreate(false); setError(null); }} />
+          <div className="detail-panel">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700 }}>Novo Membro</h2>
+              <button className="btn-icon" onClick={() => { setShowCreate(false); setError(null); }}><X size={14} /></button>
+            </div>
+
+            {error && <div className="error-banner">{error}</div>}
+
+            <form onSubmit={handleCreateSubmit} style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              <div className="form-group">
+                <label>Nº Funcionário</label>
+                <input
+                  value={createForm.employeeNumber}
+                  onChange={e => setCreateForm(f => ({ ...f, employeeNumber: e.target.value }))}
+                  placeholder="Ex: EMP007"
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Nome completo</label>
+                <input
+                  value={createForm.name}
+                  onChange={e => setCreateForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Nome completo"
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Email</label>
+                <input
+                  type="email"
+                  value={createForm.email}
+                  onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))}
+                  placeholder="email@clinica.pt"
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Contacto</label>
+                <input
+                  value={createForm.contact}
+                  onChange={e => setCreateForm(f => ({ ...f, contact: e.target.value }))}
+                  placeholder="Opcional"
+                />
+              </div>
+              <div className="form-group">
+                <label>Password</label>
+                <input
+                  type="password"
+                  value={createForm.password}
+                  onChange={e => setCreateForm(f => ({ ...f, password: e.target.value }))}
+                  placeholder="Password inicial"
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Role</label>
+                <select value={createForm.role} onChange={e => setCreateForm(f => ({ ...f, role: e.target.value }))}>
+                  <option value="EMPLOYEE">Funcionário</option>
+                  <option value="MANAGER">Gerente</option>
+                  <option value="ADMIN">Administrador</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Categoria</label>
+                <select value={createForm.category} onChange={e => setCreateForm(f => ({ ...f, category: e.target.value }))}>
+                  <option value="VETERINARIAN">Veterinário</option>
+                  <option value="NURSE">Enfermeiro</option>
+                  <option value="ADMINISTRATIVE">Administrativo</option>
+                  <option value="OPERATIONAL">Operacional</option>
+                </select>
+              </div>
+              <div className="form-actions">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setShowCreate(false); setError(null); }}>Cancelar</button>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={isCreating}>
+                  {isCreating ? "A criar..." : "Criar"}
+                </button>
+              </div>
+            </form>
           </div>
         </>
       )}
