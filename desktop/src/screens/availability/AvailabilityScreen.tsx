@@ -108,6 +108,12 @@ export function AvailabilityScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  // D-4: auto-clear message after 3s
+  function showMsg(text: string) {
+    setMessage(text);
+    setTimeout(() => setMessage(null), 3000);
+  }
+
   const availabilityByDate = useMemo(() => {
     const map = new Map<string, Availability>();
 
@@ -137,7 +143,7 @@ export function AvailabilityScreen() {
 
       setItems(result);
     } catch {
-      setMessage("Erro ao carregar disponibilidade.");
+      showMsg("Erro ao carregar disponibilidade.");
     } finally {
       setIsLoading(false);
     }
@@ -163,10 +169,10 @@ export function AvailabilityScreen() {
 
       setNote("");
       setIsAdding(false);
-      setMessage("Disponibilidade registada com sucesso.");
+      showMsg("Disponibilidade registada com sucesso.");
       await loadAvailability();
     } catch {
-      setMessage("Erro ao guardar disponibilidade.");
+      showMsg("Erro ao guardar disponibilidade.");
     } finally {
       setIsSaving(false);
     }
@@ -179,7 +185,7 @@ export function AvailabilityScreen() {
       await deleteAvailability(item.id);
       setItems((current) => current.filter((entry) => entry.id !== item.id));
     } catch {
-      setMessage("Erro ao apagar disponibilidade.");
+      showMsg("Erro ao apagar disponibilidade.");
     }
   }
 

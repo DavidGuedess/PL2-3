@@ -332,7 +332,7 @@ a { color: var(--accent); text-decoration: none; }
 .day-cell-add { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; background: none; border: 1px dashed var(--border); border-radius: 4px; color: var(--text-faint); cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.1s; z-index: 1; }
 .day-cell:hover .day-cell-add { opacity: 1; }
 .day-cell-add:hover { background: var(--surface-2); color: var(--accent); border-color: var(--accent); }
-.shift-chip { background: #1e3a6e; border-left: 3px solid var(--accent); border-radius: 4px; padding: 5px 8px; cursor: pointer; transition: background 0.12s; }
+.shift-chip { background: #1e3a6e; border-left: 3px solid var(--accent); border-radius: 4px; padding: 5px 8px; cursor: pointer; transition: background 0.12s; align-self: flex-start; width: 100%; box-sizing: border-box; flex-shrink: 0; }
 .shift-chip:hover { background: #253d72; }
 .shift-chip.draft { background: var(--surface-3); border-left-color: var(--text-faint); opacity: 0.75; }
 .shift-chip.holiday { background: rgba(39,174,96,0.1); border-left-color: var(--green); }
@@ -528,6 +528,74 @@ a { color: var(--accent); text-decoration: none; }
 /* ============================================================ SPIN */
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 0.8s linear infinite; }
+
+/* ============================================================ AVAILABILITY */
+.availability-page { min-height: 100vh; background: var(--bg); }
+.availability-shell { max-width: 800px; margin: 0 auto; padding: 0 0 80px; }
+.availability-shell.narrow { max-width: 520px; }
+
+.availability-topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.text-button { background: none; border: none; color: var(--accent); font-size: 14px; font-weight: 500; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
+.text-button:hover { background: var(--surface-2); }
+.text-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.dashboard-error { background: rgba(231,76,60,0.12); border: 1px solid rgba(231,76,60,0.3); border-radius: 6px; padding: 10px 16px; color: var(--red); margin: 12px 20px; font-size: 13px; }
+
+.availability-editor-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin: 16px 20px; overflow: hidden; }
+.availability-editor-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.availability-editor-row span { color: var(--text-muted); }
+.availability-editor-row strong { color: var(--text); }
+.availability-radio-row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--text); cursor: pointer; }
+.availability-radio-row input { accent-color: var(--accent); }
+.availability-field-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.availability-field-row span { color: var(--text-muted); }
+.availability-field-row input[type="date"] { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px; color: var(--text); font-size: 13px; font-family: inherit; }
+.availability-note-row { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; font-size: 14px; }
+.availability-note-row span { color: var(--text-muted); }
+.availability-note-row textarea { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 14px; font-family: inherit; resize: vertical; }
+.availability-info-box { margin: 16px; padding: 12px 16px; background: rgba(79,110,247,0.08); border: 1px solid rgba(79,110,247,0.2); border-radius: 6px; font-size: 12px; color: var(--text-muted); }
+
+.screen-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.screen-header h1 { font-size: 18px; font-weight: 700; color: var(--text); }
+.screen-header p  { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.secondary-button { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 14px; color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.12s; }
+.secondary-button:hover:not(:disabled) { background: var(--surface-3); }
+.secondary-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.availability-header { gap: 16px; }
+.availability-calendar-card { margin: 16px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.availability-month-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.availability-month-header strong { font-size: 15px; font-weight: 600; color: var(--text); text-transform: capitalize; }
+.availability-month-header button { background: none; border: 1px solid var(--border); border-radius: 5px; padding: 4px 8px; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; }
+.availability-month-header button:hover { background: var(--surface-2); color: var(--text); }
+.availability-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); padding: 8px 12px 4px; }
+.availability-weekdays span { text-align: center; font-size: 11px; font-weight: 600; color: var(--text-faint); text-transform: uppercase; }
+.availability-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); padding: 4px 12px 12px; gap: 2px; }
+.availability-day { aspect-ratio: 1; border-radius: 50%; border: none; background: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 13px; color: var(--text-muted); position: relative; transition: background 0.1s; }
+.availability-day:hover { background: var(--surface-2); }
+.availability-day.outside { color: var(--text-faint); }
+.availability-day.today { color: var(--accent); font-weight: 700; }
+.availability-day.selected { background: var(--surface-2); outline: 1px solid var(--border); }
+.availability-day em { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; border-radius: 50%; font-style: normal; }
+.availability-day em.preferred   { background: var(--green); }
+.availability-day em.unavailable { background: var(--red); }
+
+.availability-list-card { margin: 16px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.panel-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.panel-header h2 { font-size: 15px; font-weight: 600; color: var(--text); }
+.panel-header button { background: none; border: none; color: var(--accent); font-size: 13px; cursor: pointer; font-weight: 500; }
+.panel-header button:hover { text-decoration: underline; }
+.availability-days-list { display: flex; flex-direction: column; }
+.availability-day-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); transition: background 0.1s; }
+.availability-day-row:last-child { border-bottom: none; }
+.availability-day-row.highlighted { background: var(--surface-2); }
+.availability-day-row > div { flex: 1; }
+.availability-day-row strong { display: block; font-size: 14px; color: var(--text); }
+.availability-day-row span   { font-size: 12px; color: var(--text-muted); }
+.availability-day-row p      { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+.availability-day-row button { background: none; border: none; color: var(--red); font-size: 13px; cursor: pointer; padding: 4px 8px; border-radius: 4px; flex-shrink: 0; }
+.availability-day-row button:hover { background: rgba(231,76,60,0.1); }
+.preferred-text   { color: var(--green) !important; }
+.unavailable-text { color: var(--red)   !important; }
 
 /* ============================================================ SCROLLBAR */
 ::-webkit-scrollbar { width: 5px; height: 5px; }

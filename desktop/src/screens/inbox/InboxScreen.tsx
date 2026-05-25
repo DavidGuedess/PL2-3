@@ -10,10 +10,14 @@ import {
   sendMessage,
 } from "../../api/messagingApi";
 import { getUsers } from "../../api/userApi";
+import { UserAvatar } from "../../components/UserAvatar";
 import type { Channel, ChannelMessage } from "../../models/messaging";
 import type { User } from "../../models/user";
 import { tokenManager } from "../../storage/tokenManager";
+
 const INBOX_REFRESH_MS = 1000;
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+
 function initials(name: string) {
   return (
     name
@@ -25,11 +29,9 @@ function initials(name: string) {
   );
 }
 
-function fmtTime(ts: string) {
-  return new Intl.DateTimeFormat("pt-PT", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(ts));
+function avatarSrc(pic: string | null | undefined) {
+  if (!pic) return null;
+  return pic.startsWith("http") ? pic : `${API_BASE}${pic}`;
 }
 
 function fmtDatetime(ts: string) {
@@ -57,33 +59,51 @@ function getLastMessagePreview(
   return `${sender}: ${lastMsg.content}`;
 }
 
+function dmOtherUser(
+  channel: Channel,
+  currentUserId: number,
+  users: User[],
+): User | undefined {
+  const parts = channel.name.split("-");
+
+  if (parts.length === 3 && parts[0] === "dm") {
+    const a = Number(parts[1]);
+    const b = Number(parts[2]);
+    const otherId = a === currentUserId ? b : a;
+
+    return users.find((u) => u.id === otherId);
+  }
+
+  return undefined;
+}
+
 function dmDisplayName(
   channel: Channel,
   currentUserId: number,
   users: User[],
 ): string {
-  const parts = channel.name.split("-");
-  if (parts.length === 3 && parts[0] === "dm") {
-    const a = Number(parts[1]),
-      b = Number(parts[2]);
-    const otherId = a === currentUserId ? b : a;
-    const other = users.find((u) => u.id === otherId);
-    return other?.name ?? channel.name;
-  }
-  return channel.name;
+  const other = dmOtherUser(channel, currentUserId, users);
+
+  return other?.name ?? channel.name;
 }
 
 async function findOrCreateDm(
   currentUserId: number,
   targetId: number,
 ): Promise<Channel> {
-  const name = `dm-${Math.min(currentUserId, targetId)}-${Math.max(currentUserId, targetId)}`;
+  const name = `dm-${Math.min(currentUserId, targetId)}-${Math.max(
+    currentUserId,
+    targetId,
+  )}`;
+
   try {
     return await createChannel({ name, type: "DM", memberIds: [targetId] });
   } catch {
     const list = await getChannels();
     const existing = list.find((c) => c.name === name);
+
     if (existing) return existing;
+
     throw new Error("Não foi possível abrir o chat privado.");
   }
 }
@@ -115,6 +135,7 @@ export function InboxScreen() {
   const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
   const [allMembers, setAllMembers] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeIdRef = useRef<number | null>(null);
 
@@ -129,7 +150,7 @@ export function InboxScreen() {
 
   function showToast(msg: string) {
     setToast(msg);
-    setTimeout(() => setToast(null), 3000);
+    window.setTimeout(() => setToast(null), 3000);
   }
 
   async function loadChannels() {
@@ -137,6 +158,7 @@ export function InboxScreen() {
     setChannels(list);
     return list;
   }
+
   async function loadMessages(channelId: number, showLoading = false) {
     if (showLoading) {
       setIsLoadingMsg(true);
@@ -173,23 +195,12 @@ export function InboxScreen() {
       showToast("Erro ao carregar mensagens.");
     }
 
-    async function refreshInboxSilently() {
-      try {
-        await loadChannels();
-
-        const selectedId = activeIdRef.current;
-
-        if (selectedId) {
-          await loadMessages(selectedId, false);
-        }
-      } catch {}
-    }
-
-    setTimeout(
+    window.setTimeout(
       () => bottomRef.current?.scrollIntoView({ behavior: "smooth" }),
       80,
     );
   }
+
   async function refreshInboxSilently() {
     try {
       await loadChannels();
@@ -200,22 +211,32 @@ export function InboxScreen() {
         await loadMessages(selectedId, false);
       }
     } catch {
-      // refresh silencioso para não mostrar erro/toast a cada falha temporária
+      // refresh silencioso
     }
   }
 
   useEffect(() => {
     if (!dmParam) return;
+
     const targetId = Number(dmParam);
+
     if (!targetId) return;
+
     void (async () => {
-      await loadUsers();
-      const ch = await findOrCreateDm(currentUserId, targetId);
-      const list = await loadChannels();
-      // Ensure channel is in list
-      if (!list.find((c) => c.id === ch.id))
-        setChannels((prev) => [...prev, ch]);
-      await openChannel(ch.id);
+      try {
+        await loadUsers();
+
+        const ch = await findOrCreateDm(currentUserId, targetId);
+        const list = await loadChannels();
+
+        if (!list.find((c) => c.id === ch.id)) {
+          setChannels((prev) => [...prev, ch]);
+        }
+
+        await openChannel(ch.id);
+      } catch {
+        showToast("Erro ao abrir chat privado.");
+      }
     })();
   }, [dmParam]);
 
@@ -247,15 +268,21 @@ export function InboxScreen() {
 
   async function handleSend(e: FormEvent) {
     e.preventDefault();
+
     if (!activeId || !msgInput.trim() || isSending) return;
+
     setIsSending(true);
+
     try {
       const msg = await sendMessage(activeId, { content: msgInput.trim() });
+
       setMessages((prev) => [...prev, msg]);
       setMsgInput("");
 
       await loadChannels();
       await loadMessages(activeId, false);
+    } catch {
+      showToast("Erro ao enviar mensagem.");
     } finally {
       setIsSending(false);
     }
@@ -264,19 +291,31 @@ export function InboxScreen() {
   async function handleDelete() {
     if (!activeId) return;
     if (!window.confirm("Apagar esta conversa?")) return;
-    await deleteChannel(activeId);
-    setActiveId(null);
-    setMessages([]);
-    await loadChannels();
-    showToast("Conversa apagada.");
+
+    try {
+      await deleteChannel(activeId);
+
+      setActiveId(null);
+      activeIdRef.current = null;
+      setMessages([]);
+
+      await loadChannels();
+
+      showToast("Conversa apagada.");
+    } catch {
+      showToast("Erro ao apagar conversa.");
+    }
   }
 
   async function handleCreateDm(targetId: number) {
     try {
       const ch = await findOrCreateDm(currentUserId, targetId);
       const list = await loadChannels();
-      if (!list.find((c) => c.id === ch.id))
+
+      if (!list.find((c) => c.id === ch.id)) {
         setChannels((prev) => [...prev, ch]);
+      }
+
       await openChannel(ch.id);
     } catch {
       showToast("Erro ao abrir chat privado.");
@@ -285,20 +324,27 @@ export function InboxScreen() {
 
   async function handleCreateChannel(e: FormEvent) {
     e.preventDefault();
+
     if (!newName.trim()) return;
+
     const memberIds = allMembers ? users.map((u) => u.id) : selectedMembers;
+
     try {
       const ch = await createChannel({
         name: newName.trim(),
         type: createType,
         memberIds,
       });
+
       await loadChannels();
+
       setShowCreate(false);
       setNewName("");
       setSelectedMembers([]);
       setAllMembers(false);
+
       await openChannel(ch.id);
+
       showToast("Canal criado.");
     } catch {
       showToast("Erro ao criar canal.");
@@ -311,16 +357,15 @@ export function InboxScreen() {
     );
   }
 
-  // Split channels
   const groupChannels = channels.filter(
     (c) => c.type === "GROUP" || c.type === "ANNOUNCEMENT" || !c.type,
   );
+
   const dmChannels = channels.filter((c) => c.type === "DM");
 
-  // Permissions for current active channel
   const canSend =
     activeChannel && !(isEmployee && activeChannel.type === "ANNOUNCEMENT");
-  // DM: any member can delete; GROUP: ADMIN or MANAGER; ANNOUNCEMENT: ADMIN only
+
   const canDelete =
     activeChannel &&
     (activeChannel.type === "DM" ||
@@ -329,16 +374,15 @@ export function InboxScreen() {
 
   return (
     <div className="inbox-page">
-      {/* Left sidebar */}
       <div className="inbox-sidebar">
         <div className="inbox-header">
           <h2>Chats</h2>
         </div>
 
-        {/* Channels */}
         <div className="channel-section">
           <div className="channel-section-header">
             <span>Canais</span>
+
             {!isEmployee && (
               <button
                 title="Novo canal"
@@ -351,6 +395,7 @@ export function InboxScreen() {
               </button>
             )}
           </div>
+
           {groupChannels.map((ch) => (
             <button
               key={ch.id}
@@ -358,7 +403,9 @@ export function InboxScreen() {
               onClick={() => openChannel(ch.id)}
             >
               <div
-                className={`channel-icon ${ch.type === "ANNOUNCEMENT" ? "announcement" : "group"}`}
+                className={`channel-icon ${
+                  ch.type === "ANNOUNCEMENT" ? "announcement" : "group"
+                }`}
               >
                 {ch.type === "ANNOUNCEMENT" ? (
                   <Megaphone size={16} />
@@ -366,6 +413,7 @@ export function InboxScreen() {
                   <Users size={16} />
                 )}
               </div>
+
               <div className="channel-item-text">
                 <div className="channel-item-name">
                   {ch.name === "Todos" ? "Todos" : ch.name}
@@ -379,10 +427,10 @@ export function InboxScreen() {
           ))}
         </div>
 
-        {/* DMs */}
         <div className="channel-section dm-section">
           <div className="channel-section-header">
             <span>Mensagens diretas</span>
+
             <button
               title="Nova mensagem privada"
               onClick={() => {
@@ -393,15 +441,24 @@ export function InboxScreen() {
               <Plus size={14} />
             </button>
           </div>
+
           {dmChannels.map((ch) => {
             const displayName = dmDisplayName(ch, currentUserId, users);
+            const other = dmOtherUser(ch, currentUserId, users);
+
             return (
               <button
                 key={ch.id}
                 className={`channel-item${ch.id === activeId ? " active" : ""}`}
                 onClick={() => openChannel(ch.id)}
               >
-                <div className="channel-icon dm">{initials(displayName)}</div>
+                <UserAvatar
+                  name={displayName}
+                  profilePicture={other?.profilePicture}
+                  size="sm"
+                  className="channel-icon dm"
+                />
+
                 <div className="channel-item-text">
                   <div className="channel-item-name">{displayName}</div>
 
@@ -414,17 +471,19 @@ export function InboxScreen() {
             );
           })}
 
-          {/* List all users to start DM */}
           {users.map((u) => {
             const hasDm = dmChannels.some((ch) => {
               const p = ch.name.split("-");
+
               return (
                 p.length === 3 &&
                 p[0] === "dm" &&
                 (Number(p[1]) === u.id || Number(p[2]) === u.id)
               );
             });
+
             if (hasDm) return null;
+
             return (
               <button
                 key={`new-dm-${u.id}`}
@@ -432,9 +491,13 @@ export function InboxScreen() {
                 onClick={() => handleCreateDm(u.id)}
                 title={`Mensagem para ${u.name}`}
               >
-                <div className="channel-icon dm" style={{ opacity: 0.5 }}>
-                  {initials(u.name)}
-                </div>
+                <UserAvatar
+                  name={u.name}
+                  profilePicture={u.profilePicture}
+                  size="sm"
+                  className="channel-icon dm"
+                />
+
                 <div className="channel-item-text">
                   <div
                     className="channel-item-name"
@@ -442,6 +505,7 @@ export function InboxScreen() {
                   >
                     {u.name}
                   </div>
+
                   <div className="channel-item-preview">Iniciar conversa</div>
                 </div>
               </button>
@@ -450,29 +514,44 @@ export function InboxScreen() {
         </div>
       </div>
 
-      {/* Chat area */}
       {activeChannel ? (
         <div className="chat-area">
           <div className="chat-header">
             <div className="chat-header-left">
-              <div
-                className={`channel-icon ${activeChannel.type === "ANNOUNCEMENT" ? "announcement" : activeChannel.type === "DM" ? "dm" : "group"}`}
-                style={{ width: 36, height: 36 }}
-              >
-                {activeChannel.type === "ANNOUNCEMENT" ? (
-                  <Megaphone size={16} />
-                ) : activeChannel.type === "DM" ? (
-                  initials(dmDisplayName(activeChannel, currentUserId, users))
-                ) : (
-                  <Users size={16} />
-                )}
-              </div>
+              {activeChannel.type === "DM" ? (
+                <UserAvatar
+                  name={dmDisplayName(activeChannel, currentUserId, users)}
+                  profilePicture={
+                    dmOtherUser(activeChannel, currentUserId, users)
+                      ?.profilePicture
+                  }
+                  size="md"
+                  className="channel-icon dm"
+                />
+              ) : (
+                <div
+                  className={`channel-icon ${
+                    activeChannel.type === "ANNOUNCEMENT"
+                      ? "announcement"
+                      : "group"
+                  }`}
+                  style={{ width: 36, height: 36 }}
+                >
+                  {activeChannel.type === "ANNOUNCEMENT" ? (
+                    <Megaphone size={16} />
+                  ) : (
+                    <Users size={16} />
+                  )}
+                </div>
+              )}
+
               <div>
                 <div className="chat-header-name">
                   {activeChannel.type === "DM"
                     ? dmDisplayName(activeChannel, currentUserId, users)
                     : activeChannel.name}
                 </div>
+
                 <div className="chat-header-desc">
                   {activeChannel.type === "DM"
                     ? "Mensagem privada"
@@ -482,6 +561,7 @@ export function InboxScreen() {
                 </div>
               </div>
             </div>
+
             {canDelete && (
               <button className="btn btn-danger btn-sm" onClick={handleDelete}>
                 Apagar conversa
@@ -498,26 +578,43 @@ export function InboxScreen() {
                   Sem mensagens. Seja o primeiro a escrever!
                 </div>
               )}
+
               {messages.map((msg) => {
                 const isOwn = msg.userId === currentUserId;
                 const senderName = isOwn
                   ? "Eu"
                   : (msg.user?.name ?? `Utilizador #${msg.userId}`);
+                const pic = isOwn
+                  ? tokenManager.getProfilePicture()
+                  : msg.user?.profilePicture;
+
                 return (
                   <div
                     key={msg.id}
                     className={`chat-msg${isOwn ? " own" : ""}`}
                   >
-                    <div className="msg-avatar">{initials(senderName)}</div>
+                    {avatarSrc(pic) ? (
+                      <img
+                        src={avatarSrc(pic)!}
+                        alt={senderName}
+                        className="msg-avatar"
+                        style={{ objectFit: "cover", borderRadius: "50%" }}
+                      />
+                    ) : (
+                      <div className="msg-avatar">{initials(senderName)}</div>
+                    )}
+
                     <div className="msg-body">
                       <div className="msg-meta">
                         {senderName} · {fmtDatetime(msg.createdAt)}
                       </div>
+
                       <div className="msg-bubble">{msg.content}</div>
                     </div>
                   </div>
                 );
               })}
+
               <div ref={bottomRef} />
             </div>
           )}
@@ -530,6 +627,7 @@ export function InboxScreen() {
                 placeholder="Enviar uma mensagem..."
                 autoFocus
               />
+
               <button
                 type="submit"
                 className="btn btn-primary btn-sm"
@@ -553,13 +651,13 @@ export function InboxScreen() {
         </div>
       )}
 
-      {/* Create channel modal */}
       {showCreate && (
         <div className="modal-overlay" onClick={() => setShowCreate(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             {createStep === "type" ? (
               <>
                 <h3>Nova conversa</h3>
+
                 <div
                   style={{
                     display: "flex",
@@ -583,6 +681,7 @@ export function InboxScreen() {
                         }}
                       >
                         <Users size={22} color="var(--text-muted)" />
+
                         <span>
                           <strong>Grupo</strong>
                           <br />
@@ -591,6 +690,7 @@ export function InboxScreen() {
                           </small>
                         </span>
                       </button>
+
                       <button
                         className="btn btn-secondary"
                         style={{
@@ -604,6 +704,7 @@ export function InboxScreen() {
                         }}
                       >
                         <Megaphone size={22} color="var(--text-muted)" />
+
                         <span>
                           <strong>Anúncios</strong>
                           <br />
@@ -614,6 +715,7 @@ export function InboxScreen() {
                       </button>
                     </>
                   )}
+
                   <p
                     style={{
                       fontSize: 13,
@@ -625,6 +727,7 @@ export function InboxScreen() {
                     privada.
                   </p>
                 </div>
+
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
                   <button
                     className="btn btn-ghost btn-sm"
@@ -644,6 +747,7 @@ export function InboxScreen() {
 
                 <div className="form-group">
                   <label>Nome</label>
+
                   <input
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
@@ -665,6 +769,7 @@ export function InboxScreen() {
                       onChange={(e) => setAllMembers(e.target.checked)}
                       style={{ width: "auto" }}
                     />
+
                     <label
                       htmlFor="allm"
                       style={{
@@ -681,17 +786,24 @@ export function InboxScreen() {
                 {!allMembers && (
                   <div className="form-group">
                     <label>Membros</label>
+
                     <div className="member-list">
                       {users.map((u) => (
                         <div
                           key={u.id}
-                          className={`member-item${selectedMembers.includes(u.id) ? " selected" : ""}`}
+                          className={`member-item${
+                            selectedMembers.includes(u.id) ? " selected" : ""
+                          }`}
                           onClick={() => toggleMember(u.id)}
                         >
-                          <div className="user-avatar sm">
-                            {initials(u.name)}
-                          </div>
+                          <UserAvatar
+                            name={u.name}
+                            profilePicture={u.profilePicture}
+                            size="sm"
+                          />
+
                           <span className="member-item-name">{u.name}</span>
+
                           <span className="member-item-role">
                             {u.employeeNumber}
                           </span>
@@ -709,6 +821,7 @@ export function InboxScreen() {
                   >
                     Voltar
                   </button>
+
                   <button type="submit" className="btn btn-primary btn-sm">
                     Criar
                   </button>
@@ -719,7 +832,6 @@ export function InboxScreen() {
         </div>
       )}
 
-      {/* Toast */}
       {toast && (
         <div className="toast-container">
           <div className="toast">

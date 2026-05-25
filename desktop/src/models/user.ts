@@ -4,6 +4,7 @@ export interface User {
   name: string;
   email: string;
   contact: string | null;
+  profilePicture: string | null;
   role: string;
   category: string;
   active: boolean;

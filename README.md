@@ -1,15 +1,16 @@
 # MiauGenda
 
-Sistema de Gestão de Turnos para Clínica Veterinária
-LES 2025/26 - Tema T9 | Equipa PL2-4
+Sistema de Gestão de Turnos para Clínica Veterinária  
+LES 2025/26 — Tema T9 | Equipa PL2-4
 
 ---
 
 ## Stack
 
 | Camada | Tecnologia |
-|--------|-----------|
+|---|---|
 | App Mobile | Android (Kotlin + Jetpack Compose) |
+| App Desktop | React + TypeScript + Vite |
 | Backend | Node.js + Express + TypeScript |
 | ORM | Prisma |
 | Base de dados | PostgreSQL 16 |
@@ -18,42 +19,224 @@ LES 2025/26 - Tema T9 | Equipa PL2-4
 
 ---
 
-## Como arrancar o backend
+## Pré-requisitos
 
-**Pré-requisitos:** Docker Desktop e Git instalados.
+- [Node.js 20+](https://nodejs.org)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop)
+- Git
 
 > A rede da universidade bloqueia o Docker Hub. Usa hotspot ou faz o setup em casa.
-```bash
-# 1. Clonar o repositório
-git clone https://github.com/teu-username/PL2-4.git
-cd PL2-4
-
-# 2. Configurar variáveis de ambiente
-cp .env.example .env
-
-# 3. Arrancar os serviços
-docker-compose up --build
-```
-
-Num segundo terminal, quando os serviços estiverem a correr:
-```bash
-# 4. Criar tabelas e dados iniciais (só na primeira vez)
-docker-compose exec backend npx prisma migrate dev --name init
-docker-compose exec backend npm run db:seed
-```
-
-O backend fica disponível em `http://localhost:3001`.
-
-A documentação interativa da API (Swagger UI) está disponível em `http://localhost:3001/api-docs`.
 
 ---
 
-## Como desenvolver
+## Setup inicial (só na primeira vez)
+
+```bash
+# 1. Clonar o repositório
+git clone https://github.com/DavidGuedess/PL2-4.git
+cd PL2-4
+
+# 2. Copiar variáveis de ambiente
+cp .env.example .env
+
+# 3. Arrancar a base de dados
+docker-compose up -d db
+
+# 4. Instalar dependências do backend
+cd backend && npm install && cd ..
+
+# 5. Instalar dependências do desktop
+cd desktop && npm install && cd ..
+
+# 6. Correr migrações e seed
+cd backend
+npx prisma migrate deploy
+npm run db:seed
+cd ..
+```
+
+---
+
+## Arrancar o projeto
+
+### Script automático
+
+**Git Bash:**
+```bash
+./start.sh
+```
+
+**PowerShell:**
+```powershell
+.\start.ps1
+```
+
+Abre duas janelas separadas (backend + desktop) e mostra os URLs.
+
+### Manualmente (dois terminais)
+
+**Terminal 1 — Backend:**
+```bash
+cd backend
+npm run dev
+```
+
+**Terminal 2 — Desktop:**
+```bash
+cd desktop
+npm run dev
+```
+
+### URLs
+
+| Serviço | URL |
+|---|---|
+| Desktop (browser) | http://localhost:5173 |
+| Backend API | http://localhost:3001 |
+| Swagger UI | http://localhost:3001/api-docs |
+
+---
+
+## Credenciais de login
+
+Todos os utilizadores têm a password `password123`.
+
+| Número | Nome | Role |
+|---|---|---|
+| `EMP001` | Administrador 1 | ADMIN |
+| `EMP002` | Administrador 2 | ADMIN |
+| `EMP003` | Gerente 1 | MANAGER |
+| `EMP004` | Gerente 2 | MANAGER |
+| `EMP005` | Funcionario 1 | EMPLOYEE |
+| `EMP006` | Funcionario 2 | EMPLOYEE |
+
+> Para re-criar os utilizadores: `cd backend && npm run db:seed`
+
+---
+
+## API Reference
+
+Base URL: `http://localhost:3001`
+
+Endpoints protegidos requerem header `Authorization: Bearer <token>`.  
+O token é obtido via `POST /api/auth/login`.
+
+### Autenticação
+
+| Método | Endpoint | Acesso | Descrição |
+|---|---|---|---|
+| POST | `/api/auth/login` | Público | Login com `employeeNumber` + `password` |
+| POST | `/api/auth/refresh` | Público | Renovar access token com `refreshToken` |
+| POST | `/api/auth/logout` | Autenticado | Invalidar refresh token |
+
+**Exemplo de login:**
+```bash
+curl -X POST http://localhost:3001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"employeeNumber":"EMP001","password":"password123"}'
+```
+
+### Utilizadores
+
+| Método | Endpoint | Acesso | Descrição |
+|---|---|---|---|
+| GET | `/users` | ADMIN, MANAGER | Listar todos os utilizadores |
+| GET | `/users/me` | Todos | Perfil do utilizador autenticado |
+| GET | `/users/:id` | ADMIN | Perfil de um utilizador |
+| POST | `/users` | ADMIN | Criar utilizador |
+| PATCH | `/users/me` | Todos | Editar próprio perfil |
+| PATCH | `/users/:id/activate` | ADMIN | Reativar utilizador |
+| PATCH | `/users/:id/deactivate` | ADMIN | Desativar utilizador |
+
+### Turnos
+
+| Método | Endpoint | Acesso | Descrição |
+|---|---|---|---|
+| GET | `/shifts?week=YYYY-MM-DD` | Todos | Escala semanal |
+| GET | `/shifts?month=YYYY-MM` | Todos | Escala mensal |
+| GET | `/shifts/me` | Todos | Turnos do utilizador autenticado |
+| POST | `/shifts` | ADMIN, MANAGER | Criar turno |
+| PATCH | `/shifts/:id` | ADMIN, MANAGER | Editar turno |
+| DELETE | `/shifts/:id` | ADMIN, MANAGER | Eliminar turno |
+
+### Tipos de Turno
+
+| Método | Endpoint | Acesso | Descrição |
+|---|---|---|---|
+| GET | `/shift-types` | Todos | Listar tipos de turno |
+| POST | `/shift-types` | ADMIN, MANAGER | Criar tipo de turno |
+| PATCH | `/shift-types/:id` | ADMIN, MANAGER | Editar tipo de turno |
+| DELETE | `/shift-types/:id` | ADMIN, MANAGER | Eliminar tipo de turno |
+
+### Registos de Ponto
+
+| Método | Endpoint | Acesso | Descrição |
+|---|---|---|---|
+| POST | `/attendance` | Todos | Registar entrada (IN) ou saída (OUT) |
+| GET | `/attendance/me` | Todos | Histórico próprio (`?from=&to=`) |
+| GET | `/attendance/active` | ADMIN, MANAGER | Funcionários em turno agora |
+| GET | `/attendance/report` | ADMIN, MANAGER | Relatório de presenças |
+| GET | `/attendance/stats` | ADMIN, MANAGER | Estatísticas |
+| GET | `/attendance` | ADMIN, MANAGER | Histórico de um funcionário (`?userId=`) |
+| PATCH | `/attendance/:id` | ADMIN | Editar registo |
+| DELETE | `/attendance/:id` | ADMIN | Eliminar registo |
+
+### Pedidos de Folga
+
+| Método | Endpoint | Acesso | Descrição |
+|---|---|---|---|
+| GET | `/time-off-requests` | Todos | Listar pedidos |
+| POST | `/time-off-requests` | Todos | Criar pedido |
+| PATCH | `/time-off-requests/:id/status` | ADMIN, MANAGER | Aprovar/rejeitar |
+| DELETE | `/time-off-requests/:id` | Todos | Cancelar pedido |
+
+### Trocas de Turno
+
+| Método | Endpoint | Acesso | Descrição |
+|---|---|---|---|
+| GET | `/shift-swap-requests` | Todos | Listar pedidos |
+| POST | `/shift-swap-requests` | Todos | Criar pedido |
+| PATCH | `/shift-swap-requests/:id/target-response` | Todos | Resposta do visado |
+| PATCH | `/shift-swap-requests/:id/status` | ADMIN, MANAGER | Aprovação final |
+| DELETE | `/shift-swap-requests/:id` | Todos | Cancelar pedido |
+
+### Disponibilidade
+
+| Método | Endpoint | Acesso | Descrição |
+|---|---|---|---|
+| GET | `/availability` | Todos | Consultar disponibilidades |
+| POST | `/availability` | Todos | Registar disponibilidade |
+| DELETE | `/availability/:id` | Todos | Remover disponibilidade |
+
+### Canais de Mensagens
+
+| Método | Endpoint | Acesso | Descrição |
+|---|---|---|---|
+| GET | `/channels` | Todos | Listar canais |
+| POST | `/channels` | Todos | Criar canal |
+| DELETE | `/channels/:id` | Todos | Apagar canal |
+| GET | `/channels/:id/messages` | Todos | Mensagens de um canal |
+| POST | `/channels/:id/messages` | Todos | Enviar mensagem |
+
+### Atribuições Semanais
+
+| Método | Endpoint | Acesso | Descrição |
+|---|---|---|---|
+| GET | `/week-assignments` | Todos | Listar atribuições |
+| POST | `/week-assignments` | ADMIN, MANAGER | Criar atribuição |
+| PATCH | `/week-assignments/:id` | ADMIN, MANAGER | Editar atribuição |
+| DELETE | `/week-assignments/:id` | ADMIN, MANAGER | Eliminar atribuição |
+
+---
+
+## Workflow de desenvolvimento
+
 ```
 main        ← apenas via Pull Request aprovado
   └── develop   ← branch de integração
         └── feature/us-XX-nome  ← uma branch por User Story
 ```
+
 ```bash
 # Partir sempre de develop atualizado
 git checkout develop
@@ -62,276 +245,27 @@ git checkout -b feature/us-XX-nome
 
 # Guardar trabalho
 git add .
-git commit -m "feat: descricao do que fizeste"
+git commit -m "feat: descrição do que fizeste"
 git push origin feature/us-XX-nome
 ```
 
-Abre um Pull Request no GitHub de `feature/us-XX-nome` para `develop`.
+Abre um Pull Request de `feature/us-XX-nome` → `develop`.  
 Necessita de 1 aprovação antes de fazer merge.
 
 ---
 
 ## Comandos úteis
+
 ```bash
-# Parar os serviços
+# Parar a base de dados
 docker-compose down
 
-# Ver logs do backend
-docker-compose logs -f backend
-
 # Nova migração após alterar o schema.prisma
-docker-compose exec backend npx prisma migrate dev --name nome-da-migracao
+cd backend && npx prisma migrate dev --name nome-da-migracao
 
-# Ver base de dados visualmente
-docker-compose exec backend npx prisma studio
+# Abrir Prisma Studio (interface visual da BD)
+cd backend && npx prisma studio
+
+# Correr testes
+cd backend && npm test
 ```
-
----
-
-## Histórico de alterações
-
-### SCRUM-55 — Gestão básica de utilizadores (Sprint 1)
-
-- Dados iniciais em memória (in-memory storage)
-- Endpoint GET /users — listar utilizadores
-- Endpoint POST /users — criar utilizador
-- Endpoint PATCH /users/:id/deactivate — desativar utilizador
-
-> Nota: dados em memória são temporários e reiniciam com o servidor.
-
----
-
-### SCRUM-97 — Atualização do modelo de dados de utilizadores (Sprint 2, subtask 1.1)
-
-Alinhamento dos tipos TypeScript com o schema Prisma:
-
-- `UserRole`: `ADMIN | MANAGER | EMPLOYEE`
-- `UserCategory` (novo): `VETERINARIAN | NURSE | OPERATIONAL | ADMINISTRATIVE`
-- Campos renomeados para coincidir com o schema: `fullName → name`, `isActive → active`
-- `id` alterado de UUID (string) para inteiro com autoincrement
-- Adicionados campos `passwordHash`, `updatedAt`
-- Novo tipo `UserPublic` (omite `passwordHash`) usado nas respostas da API
-- Validação do `POST /users` atualizada para incluir `category`
-
-**Modelo atual da tabela `User`:**
-
-| Campo | Tipo | Notas |
-|---|---|---|
-| id | Int | autoincrement, PK |
-| employeeNumber | String | único |
-| name | String | |
-| email | String | único |
-| passwordHash | String | nunca exposto na API |
-| role | Role | ADMIN, MANAGER, EMPLOYEE |
-| category | Category | VETERINARIAN, NURSE, OPERATIONAL, ADMINISTRATIVE |
-| active | Boolean | default true |
-| createdAt | DateTime | auto |
-| updatedAt | DateTime | auto |
-
----
-
-### SCRUM-98 — Migration Prisma + Seed inicial (Sprint 2, subtask 1.2)
-
-- Migration `20260313114044_init` já incluía os campos `role` e `category` — verificada e confirmada
-- Criado `backend/src/prisma/seed.ts` com 3 utilizadores iniciais (Admin, Manager, Employee)
-- Passwords encriptadas com bcrypt
-- Seed usa `upsert` — pode ser re-executado sem criar duplicados
-
-Para correr o seed:
-```bash
-docker-compose exec backend npm run db:seed
-```
-
----
-
-### SCRUM-67 — Modelo de dados de turnos (Sprint 2)
-
-- Criado modelo Prisma `ShiftType` (nome, hora início, hora fim)
-- Criado modelo Prisma `Shift` (userId, shiftTypeId, data)
-- Migration `20260322000000_shifts` gerada com as duas tabelas
-- Constraint única `userId + date` para impedir turnos sobrepostos
-
-**Modelos adicionados:**
-
-| Modelo | Campos principais |
-|---|---|
-| ShiftType | id, name, startTime, endTime |
-| Shift | id, userId, shiftTypeId, date — unique(userId, date) |
-
----
-
-### SCRUM-68 — API de gestão e atribuição de turnos (Sprint 2)
-
-Novos ficheiros: `backend/src/routes/shiftTypes.ts`, `backend/src/routes/shifts.ts`
-
-**Endpoints de tipos de turno:**
-- `GET /shift-types` — listar todos os tipos de turno
-- `POST /shift-types` — criar tipo de turno (name, startTime, endTime)
-- `PATCH /shift-types/:id` — atualizar tipo de turno
-- `DELETE /shift-types/:id` — eliminar tipo de turno
-
-**Endpoints de turnos:**
-- `POST /shifts` — atribuir turno a funcionário (userId, shiftTypeId, date)
-- `GET /shifts?week=2026-03-23` — escala semanal (segunda a domingo)
-- `GET /shifts?month=2026-03` — escala mensal
-
----
-
-### SCRUM-61 — CI, Swagger e documentação de endpoints (Sprint 2)
-
-- Pipeline CI (GitHub Actions) configurado para correr em qualquer branch (push e pull request)
-- Instalado `swagger-jsdoc` + `swagger-ui-express`
-- Documentação interativa disponível em `http://localhost:3001/api-docs`
-- Todos os endpoints documentados com OpenAPI 3.0:
-  - `GET /health`
-  - `GET /users`
-  - `POST /users`
-  - `POST /api/auth/login`
-  - `POST /api/auth/logout`
-
----
-
-### SCRUM-63 — Controlo de acesso por papel - RBAC (Sprint 2)
-
-- Campo `role` adicionado ao payload do JWT (access token inclui agora `userId`, `email` e `role`)
-- Criado middleware `requireRole(...roles)` em `middleware/auth.ts` — retorna 403 se o papel do utilizador não estiver na lista permitida
-- Adicionado `authenticate` aos routers de `/shifts` e `/shift-types` (estavam sem autenticação)
-- Documentação Swagger atualizada com `security: bearerAuth` e respostas `401`/`403` em todos os endpoints protegidos
-- Criado `tests/rbac.test.ts` com testes de autorização (403 para papéis incorretos, acesso confirmado para papéis corretos)
-
-**Tabela de controlo de acesso (atualizada):**
-
-| Endpoint | Papéis permitidos |
-|---|---|
-| `GET /users` | ADMIN, MANAGER |
-| `GET /users/me` | todos |
-| `GET /users/:id` | ADMIN |
-| `POST /users` | ADMIN |
-| `PATCH /users/me` | todos |
-| `PATCH /users/:id/deactivate` | ADMIN |
-| `PATCH /users/:id/activate` | ADMIN |
-| `GET /shifts` | todos |
-| `GET /shifts/me` | todos |
-| `POST /shifts` | ADMIN, MANAGER |
-| `PATCH /shifts/:id` | ADMIN, MANAGER |
-| `DELETE /shifts/:id` | ADMIN, MANAGER |
-| `GET /shift-types` | todos |
-| `POST /shift-types` | ADMIN, MANAGER |
-| `PATCH /shift-types/:id` | ADMIN, MANAGER |
-| `DELETE /shift-types/:id` | ADMIN, MANAGER |
-| `POST /attendance` | todos |
-| `GET /attendance/me` | todos |
-| `GET /attendance` | ADMIN, MANAGER |
-
----
-
-### SCRUM-110 — Consulta e edição de perfil do utilizador (Sprint 2)
-
-- `GET /users/me` — devolve o perfil do utilizador autenticado (sem `passwordHash`)
-- `PATCH /users/me` — atualiza campos do próprio perfil; aceita qualquer combinação de `name`, `contact` e `password` (mínimo 6 caracteres)
-- Retorna `400` se nenhum campo for fornecido ou se o valor for inválido
-- Retorna `401` se o token não identificar um utilizador existente
-
----
-
-### SCRUM-111 — Modelo de registos de ponto (Sprint 2)
-
-Adicionado modelo `AttendanceRecord` ao schema Prisma:
-
-| Campo | Tipo | Notas |
-|---|---|---|
-| id | Int | autoincrement, PK |
-| userId | Int | FK para User |
-| type | AttendanceType | IN ou OUT |
-| timestamp | DateTime | auto (now) |
-
-- Constraint de sequência IN/OUT validada ao nível da aplicação (não pode registar OUT sem IN anterior, nem dois IN seguidos)
-- Migration `20260407_attendance` gerada com a nova tabela
-
----
-
-### SCRUM-143 — Endpoint de horário pessoal (Sprint 3)
-
-- Novo endpoint `GET /shifts/me` — devolve os turnos do utilizador autenticado
-- Suporta filtros `?week=YYYY-MM-DD` (semana) e `?month=YYYY-MM` (mês)
-- Retorna informação completa do `ShiftType` (nome, hora de início e fim)
-- O utilizador só consegue ver os seus próprios turnos — `userId` extraído do token JWT
-- Retorna `400` se nenhum filtro for fornecido
-- Adicionados testes unitários em `shifts.test.ts` (6 casos de teste)
-- Corrigido bug no mock do `attendance.test.ts` (faltava `findFirst`)
-- `swagger-ui-express` adicionado como dependência explícita no `package.json`
-
-| Endpoint | Papéis permitidos |
-|---|---|
-| `GET /shifts/me` | todos |
-
----
-
-### SCRUM-114 — Ecrã de Login Android (Sprint 3)
-
-- Campo para número de funcionário e password (com toggle de visibilidade)
-- Validação de campos obrigatórios e mensagens de erro
-- Loading state durante autenticação
-- Integração com `POST /api/auth/login`
-
----
-
-### SCRUM-113 — Ecrã Dashboard Android (Sprint 3)
-
-- Ecrã principal após login com dados do utilizador autenticado (nome, papel, categoria)
-- Apresenta o próximo turno agendado para o utilizador
-- Dados obtidos via `GET /users/me` e `GET /shifts/me`
-
----
-
-### SCRUM-115 — Registo de ponto (Sprint 3)
-
-**Endpoints:**
-- `POST /attendance` — registar entrada (IN) ou saída (OUT) do utilizador autenticado
-- `GET /attendance/me` — consultar o próprio histórico; suporta filtros `?from=YYYY-MM-DD` e `?to=YYYY-MM-DD`
-- `GET /attendance?userId=X` — monitorizar registos de um funcionário (ADMIN/MANAGER); suporta os mesmos filtros de data
-
-Validação da sequência IN/OUT garante consistência dos registos (não é possível registar dois IN seguidos nem um OUT sem IN anterior).
-
----
-
-### SCRUM-138 — Edição e remoção de turnos (Sprint 3)
-
-- `PATCH /shifts/:id` — editar um turno existente; aceita `shiftTypeId` e/ou `date`; retorna `409` se o funcionário já tiver turno na nova data
-- `DELETE /shifts/:id` — remover um turno; retorna `204` em caso de sucesso
-
-Ambos os endpoints requerem papel ADMIN ou MANAGER. Retornam `404` se o turno não existir.
-
----
-
-### SCRUM-139 — Reativação de utilizadores (Sprint 3)
-
-- `PATCH /users/:id/activate` — reativa um utilizador previamente desativado
-- Exclusivo para ADMIN
-- Retorna `404` se o utilizador não existir
-- Retorna `409` se o utilizador já estiver ativo
-- Retorna `200` com o perfil atualizado (sem `passwordHash`)
-
-# SCRUM-115 "Registo de ponto"
-- Implementado endpoint POST /attendance para registo de entradas/saídas.
-- Implementado endpoint GET /attendance/me para consulta do histórico do utilizador autenticado.
-- Adicionada validação da sequência IN/OUT para garantir consistência dos registos.
-- Integração com Prisma/PostgreSQL e validação através de testes manuais (Postman).
-
-# SCRUM-176 "Ecrã de perfil do utilizador"
-
-- Implementado ProfileScreen com campos editáveis (nome, contacto, password).
-- Adicionado GET /users/me para obter dados do utilizador.
-- Implementado PATCH /users/me para atualizar o perfil.
-- Ligação do ProfileScreen ao Dashboard através de navegação.
-- Atualização do TokenManager após alterações para manter a UI sincronizada.
-
-# SCRUM-177 "Ecrã de histórico de presenças"
-
-- Implementado AttendanceHistoryScreen com listagem de registos de presença (IN/OUT).
-- Integração com GET /attendance/me para obter histórico do utilizador.
-- Criação de AttendanceHistoryViewModel para gestão de estado e lógica de dados.
-- Implementados filtros por intervalo de datas (from/to) com DatePicker.
-- Agrupamento dos registos por dia, com cálculo do tempo total diário.
-- Adição de visualização detalhada por dia (modal com registos e horas).
-- Navegação a partir do Dashboard para acesso ao histórico.

@@ -351,6 +351,7 @@ private fun BrowseChannelsScreen(
     var isCreating by remember { mutableStateOf(false) }
     var createError by remember { mutableStateOf<String?>(null) }
     var openingDm by remember { mutableStateOf(false) }
+    var dmError by remember { mutableStateOf<String?>(null) }
 
     fun resetCreate() {
         createStep = null; newChannelName = ""; newChannelDesc = ""
@@ -636,6 +637,16 @@ private fun BrowseChannelsScreen(
 
                 // Secção de utilizadores para mensagem privada
                 if (filteredUsers.isNotEmpty()) {
+                    if (dmError != null) {
+                        item {
+                            Text(
+                                text = dmError ?: "",
+                                color = Color(0xFFFF3B30),
+                                fontSize = 13.sp,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
                     item {
                         Text("Membros da equipa", color = TxtGray, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.fillMaxWidth().background(DkSurface2).padding(horizontal = 20.dp, vertical = 8.dp))
@@ -646,11 +657,18 @@ private fun BrowseChannelsScreen(
                             modifier = Modifier.fillMaxWidth()
                                 .clickable(enabled = !openingDm) {
                                     openingDm = true
+                                    dmError = null
                                     scope.launch {
                                         try {
                                             val ch = findOrCreateDmChannel(currentUserId, user.id)
-                                            ch?.let { onSelectChannel(it, user.name) }
-                                        } catch (_: Exception) {}
+                                            if (ch != null) {
+                                                onSelectChannel(ch, user.name)
+                                            } else {
+                                                dmError = "Não foi possível abrir a conversa."
+                                            }
+                                        } catch (_: Exception) {
+                                            dmError = "Erro de ligação ao servidor."
+                                        }
                                         openingDm = false
                                     }
                                 }
@@ -718,7 +736,10 @@ private fun ChatRoomScreen(
         try {
             val resp = RetrofitClient.messagingApi.getMessages(channelId)
             if (resp.isSuccessful) messages = resp.body().orEmpty()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // Re-throw CancellationException to allow coroutine cancellation to propagate
+            if (e is kotlinx.coroutines.CancellationException) throw e
+        }
     }
 
     LaunchedEffect(channelId) {
