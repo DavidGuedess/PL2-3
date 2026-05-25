@@ -17,6 +17,59 @@ function getWeekStart(dateStr: string): Date {
   return start
 }
 
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     WeekAssignment:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *         userId:
+ *           type: integer
+ *         weekStart:
+ *           type: string
+ *           format: date
+ *         user:
+ *           type: object
+ *           properties:
+ *             id:
+ *               type: integer
+ *             name:
+ *               type: string
+ *             employeeNumber:
+ *               type: string
+ *             role:
+ *               type: string
+ *             category:
+ *               type: string
+ */
+
+/**
+ * @openapi
+ * /week-assignments:
+ *   get:
+ *     summary: Listar os funcionários atribuídos a uma semana
+ *     tags: [Atribuições Semanais]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: week
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Qualquer data dentro da semana pretendida (YYYY-MM-DD)
+ *     responses:
+ *       200:
+ *         description: Lista de atribuições da semana
+ *       400:
+ *         description: Parâmetro week obrigatório
+ *       401:
+ *         description: Não autenticado
+ */
 // GET /week-assignments?week=YYYY-MM-DD
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -37,6 +90,41 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 })
 
+/**
+ * @openapi
+ * /week-assignments:
+ *   post:
+ *     summary: Atribuir um funcionário a uma semana (Admin/Gestor)
+ *     tags: [Atribuições Semanais]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [userId, weekStart]
+ *             properties:
+ *               userId:
+ *                 type: integer
+ *                 example: 1
+ *               weekStart:
+ *                 type: string
+ *                 format: date
+ *                 example: "2026-03-23"
+ *     responses:
+ *       201:
+ *         description: Atribuição criada
+ *       400:
+ *         description: userId e weekStart obrigatórios
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
+ *       404:
+ *         description: Utilizador não encontrado
+ */
 // POST /week-assignments  { userId, weekStart: "YYYY-MM-DD" }
 router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -62,6 +150,31 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Resp
   }
 })
 
+/**
+ * @openapi
+ * /week-assignments/{id}:
+ *   delete:
+ *     summary: Remover uma atribuição semanal (Admin/Gestor)
+ *     description: Apaga também os turnos desse funcionário nessa semana.
+ *     tags: [Atribuições Semanais]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       204:
+ *         description: Atribuição removida
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Sem permissão (requer ADMIN ou MANAGER)
+ *       404:
+ *         description: Atribuição não encontrada
+ */
 // DELETE /week-assignments/:id  (também apaga os turnos do utilizador nessa semana)
 router.delete('/:id', requireRole('ADMIN', 'MANAGER'), async (req: Request, res: Response, next: NextFunction) => {
   try {

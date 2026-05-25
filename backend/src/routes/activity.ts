@@ -7,6 +7,74 @@ const prisma = new PrismaClient()
 
 router.use(authenticate)
 
+/**
+ * @openapi
+ * /activity:
+ *   get:
+ *     summary: Cronologia de atividade (presenças, folgas e trocas de turno)
+ *     description: EMPLOYEE vê apenas a própria atividade; Admin/Gestor pode filtrar por funcionário com ?userId.
+ *     tags: [Atividade]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: integer
+ *         description: Filtrar por funcionário (apenas Admin/Gestor)
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Data inicial do intervalo
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Data final do intervalo
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [all, attendance, timeoff, swap]
+ *           default: all
+ *         description: Tipo de evento a incluir
+ *     responses:
+ *       200:
+ *         description: Lista de eventos por ordem cronológica decrescente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: string
+ *                   type:
+ *                     type: string
+ *                     enum: [attendance, timeoff, swap]
+ *                   action:
+ *                     type: string
+ *                   detail:
+ *                     type: string
+ *                   timestamp:
+ *                     type: string
+ *                     format: date-time
+ *                   userId:
+ *                     type: integer
+ *                   userName:
+ *                     type: string
+ *                   employeeNumber:
+ *                     type: string
+ *                   status:
+ *                     type: string
+ *                     nullable: true
+ *       401:
+ *         description: Não autenticado
+ */
 // GET /activity
 // Returns a unified timeline of attendance, time-off and shift-swap events for a user.
 // EMPLOYEE: only own activity
