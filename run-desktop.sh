@@ -129,4 +129,4 @@ echo -e "  ${GRAY}  EMP001 / password123  — Employee — Mariana Ferreira${NC}
 echo -e "  ${GRAY}  EMP002 / password123  — Employee — Carlos Rodrigues${NC}"
 echo ""
 
-npm run dev -- --open
+npm run electron:dev
