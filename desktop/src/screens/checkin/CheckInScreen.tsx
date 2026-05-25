@@ -1,245 +1,201 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ArrowLeft, LogIn, LogOut, Clock } from "lucide-react";
 
-import {
-  getMyAttendanceHistory,
-  registerAttendance
-} from "../../api/attendanceApi";
+import { getMyAttendanceHistory, registerAttendance } from "../../api/attendanceApi";
 import { getMyShifts } from "../../api/shiftApi";
-
 import type { AttendanceRecord } from "../../models/attendance";
 import type { Shift } from "../../models/shift";
-
-import {
-  resolvedEndTime,
-  resolvedName,
-  resolvedStartTime
-} from "../../models/shift";
+import { resolvedEndTime, resolvedName, resolvedStartTime } from "../../models/shift";
 import { routes } from "../../navigation/routes";
 
-function getToday(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+function getToday(): string { return new Date().toISOString().slice(0, 10); }
 
 function getWeekStart(date: Date): string {
   const copy = new Date(date);
   const day = copy.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-
-  copy.setDate(copy.getDate() + diff);
-
+  copy.setDate(copy.getDate() + (day === 0 ? -6 : 1 - day));
   return copy.toISOString().slice(0, 10);
 }
 
-function formatDate(timestamp: string): string {
+function fmtDate(ts: string): string {
   try {
-    return new Intl.DateTimeFormat("pt-PT", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric"
-    }).format(new Date(timestamp));
-  } catch {
-    return timestamp;
-  }
+    return new Intl.DateTimeFormat("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(ts));
+  } catch { return ts; }
 }
 
-function formatTime(timestamp: string): string {
+function fmtTime(ts: string): string {
   try {
-    return new Intl.DateTimeFormat("pt-PT", {
-      hour: "2-digit",
-      minute: "2-digit"
-    }).format(new Date(timestamp));
-  } catch {
-    return timestamp;
-  }
-}
-
-function formatType(type: string): string {
-  return type === "IN" ? "Entrada" : "Saída";
+    return new Intl.DateTimeFormat("pt-PT", { hour: "2-digit", minute: "2-digit" }).format(new Date(ts));
+  } catch { return ts; }
 }
 
 export function CheckInScreen() {
   const navigate = useNavigate();
 
+  const today     = useMemo(() => getToday(), []);
+  const weekStart = useMemo(() => getWeekStart(new Date()), []);
+
   const [isWorking, setIsWorking] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [toast,     setToast]     = useState<{ text: string; error?: boolean } | null>(null);
+  const [records,   setRecords]   = useState<AttendanceRecord[]>([]);
   const [todayShift, setTodayShift] = useState<Shift | null>(null);
 
-  const today = useMemo(() => getToday(), []);
-  const weekStart = useMemo(() => getWeekStart(new Date()), []);
+  // D-3: auto-clear toast after 3s
+  function showToast(text: string, error = false) {
+    setToast({ text, error });
+    setTimeout(() => setToast(null), 3000);
+  }
 
   async function loadTodayShift() {
     try {
       const shifts = await getMyShifts({ week: weekStart });
-
-      const shift = shifts.find((item) => {
-        return item.published && item.date.slice(0, 10) === today;
-      });
-
-      setTodayShift(shift ?? null);
+      setTodayShift(shifts.find(s => s.published && s.date.slice(0, 10) === today) ?? null);
     } catch {
       setTodayShift(null);
     }
   }
 
-  async function loadMyAttendanceHistory() {
+  async function loadHistory() {
     try {
       setIsLoading(true);
-      setMessage(null);
-
       const history = await getMyAttendanceHistory();
-
-      const ordered = [...history].sort((a, b) => {
-        return b.timestamp.localeCompare(a.timestamp);
-      });
-
-      const latestRecord = ordered.length > 0 ? ordered[0] : undefined;
-
+      const ordered = [...history].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
       setRecords(ordered);
-      setIsWorking(latestRecord?.type === "IN");
+      // D-2: only TODAY's records determine working state
+      const todayRecords = ordered.filter(r => r.timestamp.slice(0, 10) === today);
+      setIsWorking(todayRecords.length > 0 && todayRecords[0].type === "IN");
     } catch {
-      setMessage("Erro ao carregar histórico");
+      showToast("Erro ao carregar histórico.", true);
     } finally {
       setIsLoading(false);
     }
   }
 
-  async function handleRegisterIn() {
+  async function handleRegister(type: "IN" | "OUT") {
     try {
       setIsLoading(true);
-      setMessage(null);
-
-      await registerAttendance({ type: "IN" });
-
-      setMessage("Entrada registada com sucesso");
-      await loadMyAttendanceHistory();
+      await registerAttendance({ type });
+      showToast(type === "IN" ? "Entrada registada." : "Saída registada.");
+      await loadHistory();
     } catch {
-      setMessage("Erro ao registar entrada");
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function handleRegisterOut() {
-    try {
-      setIsLoading(true);
-      setMessage(null);
-
-      await registerAttendance({ type: "OUT" });
-
-      setMessage("Saída registada com sucesso");
-      await loadMyAttendanceHistory();
-    } catch {
-      setMessage("Erro ao registar saída");
+      showToast(`Erro ao registar ${type === "IN" ? "entrada" : "saída"}.`, true);
     } finally {
       setIsLoading(false);
     }
   }
 
   useEffect(() => {
-    void loadMyAttendanceHistory();
+    void loadHistory();
     void loadTodayShift();
   }, []);
 
   return (
-    <main className="checkin-page">
-      <section className="checkin-shell">
-        <header className="screen-header">
-          <button className="secondary-button" onClick={() => navigate(routes.dashboard)}>
-            Voltar
+    <div className="screen-body" style={{ maxWidth: 640, margin: "0 auto" }}>
+      {/* Header */}
+      <div className="page-header">
+        <button className="btn btn-ghost btn-sm" onClick={() => navigate(routes.dashboard)}>
+          <ArrowLeft size={15} /> Voltar
+        </button>
+        <h1>Registo de Presença</h1>
+      </div>
+
+      {/* Today shift */}
+      <div className="panel-card" style={{ marginBottom: 16 }}>
+        <div className="panel-card-header">
+          <h3>Turno de hoje</h3>
+        </div>
+        {todayShift ? (
+          <div className="detail-info-list">
+            <div className="detail-info-row">
+              <span>Data</span>
+              <strong>{fmtDate(todayShift.date)}</strong>
+            </div>
+            <div className="detail-info-row">
+              <span>Horário</span>
+              <strong>{resolvedStartTime(todayShift)} — {resolvedEndTime(todayShift)}</strong>
+            </div>
+            <div className="detail-info-row">
+              <span>Posição</span>
+              <strong>{resolvedName(todayShift)}</strong>
+            </div>
+          </div>
+        ) : (
+          <p className="muted-text" style={{ padding: "12px 0" }}>Sem turno agendado para hoje.</p>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div className="panel-card" style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 12 }}>
+          <button
+            className="btn btn-primary"
+            style={{ flex: 1, justifyContent: "center" }}
+            onClick={() => void handleRegister("IN")}
+            disabled={isWorking || isLoading}
+          >
+            <LogIn size={16} />
+            {isLoading ? "A processar..." : "Registar Entrada"}
           </button>
+          <button
+            className="btn btn-secondary"
+            style={{ flex: 1, justifyContent: "center" }}
+            onClick={() => void handleRegister("OUT")}
+            disabled={!isWorking || isLoading}
+          >
+            <LogOut size={16} />
+            {isLoading ? "A processar..." : "Registar Saída"}
+          </button>
+        </div>
+        {isWorking && (
+          <p style={{ marginTop: 10, fontSize: 12, color: "var(--green)", display: "flex", alignItems: "center", gap: 5 }}>
+            <Clock size={12} /> Em turno agora
+          </p>
+        )}
+      </div>
 
-          <div>
-            <h1>MIAUGENDA</h1>
-            <p>Registo de presença</p>
-          </div>
-        </header>
-
-        <section className="checkin-card">
-          <span className="section-kicker">Turno atual</span>
-
-          <div className="current-shift-box">
-            {todayShift ? (
-              <>
-                <div className="info-line">
-                  <strong>Data:</strong>
-                  <span>{formatDate(todayShift.date)}</span>
-                </div>
-
-                <div className="info-line">
-                  <strong>Horário:</strong>
-                  <span>
-                    {resolvedStartTime(todayShift)} - {resolvedEndTime(todayShift)}
-                  </span>
-                </div>
-
-                <div className="info-line">
-                  <strong>Posição:</strong>
-                  <span>{resolvedName(todayShift)}</span>
-                </div>
-              </>
-            ) : (
-              <div className="info-line">
-                <strong>Estado:</strong>
-                <span>Sem turno agendado para hoje</span>
-              </div>
-            )}
-          </div>
-
-          <div className="checkin-actions">
-            <button
-              className="success-button"
-              onClick={handleRegisterIn}
-              disabled={isWorking || isLoading}
-            >
-              {isLoading ? "A processar..." : "Registar Entrada"}
-            </button>
-
-            <button
-              className="success-button"
-              onClick={handleRegisterOut}
-              disabled={!isWorking || isLoading}
-            >
-              {isLoading ? "A processar..." : "Registar Saída"}
-            </button>
-          </div>
-
-          {message && (
-            <div className="checkin-message">
-              {message}
-            </div>
-          )}
-        </section>
-
-        <section className="panel-card">
-          <div className="panel-header">
-            <h2>Histórico de registos</h2>
-          </div>
-
-          {records.length === 0 ? (
-            <p className="muted-text">
-              Ainda não existem registos de presença.
-            </p>
-          ) : (
-            <div className="attendance-list">
-              {records.slice(0, 5).map((record) => (
-                <div className="attendance-row" key={record.id}>
-                  <div>
-                    <strong>{formatDate(record.timestamp)}</strong>
-                    <span>Registo de presença</span>
-                  </div>
-
-                  <p>
-                    {formatType(record.type)}: {formatTime(record.timestamp)}
-                  </p>
-                </div>
+      {/* Recent history */}
+      <div className="panel-card">
+        <div className="panel-card-header">
+          <h3>Histórico recente</h3>
+        </div>
+        {records.length === 0 ? (
+          <p className="muted-text" style={{ padding: "12px 0" }}>Sem registos de presença.</p>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Tipo</th>
+                <th>Hora</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.slice(0, 10).map(r => (
+                <tr key={r.id} style={{ cursor: "default" }}>
+                  <td>{fmtDate(r.timestamp)}</td>
+                  <td>
+                    <span className={`status-badge ${r.type === "IN" ? "active" : "inactive"}`}>
+                      {r.type === "IN" ? "Entrada" : "Saída"}
+                    </span>
+                  </td>
+                  <td style={{ color: "var(--text-muted)" }}>{fmtTime(r.timestamp)}</td>
+                </tr>
               ))}
-            </div>
-          )}
-        </section>
-      </section>
-    </main>
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Toast */}
+      {toast && (
+        <div className="toast-container">
+          <div className={`toast${toast.error ? " error" : ""}`}>
+            <Clock size={14} /> {toast.text}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
