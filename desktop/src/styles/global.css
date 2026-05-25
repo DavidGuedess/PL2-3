@@ -96,6 +96,8 @@ a { color: var(--accent); text-decoration: none; }
   text-align: left;
 }
 
+
+
 .sidebar-item:hover { background: var(--surface); color: var(--text); }
 .sidebar-item.active { background: var(--surface-2); color: var(--text); border-left: 3px solid var(--accent); padding-left: 9px; }
 

@@ -11,6 +11,7 @@ function createWindow() {
     minHeight: 700,
     backgroundColor: "#000000",
     title: "MiauGenda Desktop",
+    icon: path.join(__dirname, "../images/logo.ico"),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
