@@ -3,7 +3,7 @@ import { Megaphone, Users, MessageSquare, Check, Plus } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
 import { createChannel, deleteChannel, getChannels, getMessages, sendMessage } from "../../api/messagingApi";
-import { getUsers } from "../../api/userApi";
+import { getColleagues } from "../../api/userApi";
 import { UserAvatar } from "../../components/UserAvatar";
 import type { Channel, ChannelMessage } from "../../models/messaging";
 import type { User } from "../../models/user";
@@ -102,8 +102,8 @@ export function InboxScreen() {
   }
 
   async function loadUsers() {
-    const list = await getUsers();
-    setUsers(list.filter(u => u.active && u.id !== currentUserId));
+    const list = await getColleagues();
+    setUsers(list.filter(u => u.id !== currentUserId) as User[]);
   }
 
   async function openChannel(id: number) {
@@ -341,18 +341,19 @@ export function InboxScreen() {
               {messages.map(msg => {
                 const isOwn = msg.userId === currentUserId;
                 const senderName = isOwn ? "Eu" : (msg.user?.name ?? `Utilizador #${msg.userId}`);
+                const avatarName = isOwn ? (tokenManager.getUserName() ?? "Eu") : senderName;
                 const pic = isOwn ? tokenManager.getProfilePicture() : msg.user?.profilePicture;
                 return (
                   <div key={msg.id} className={`chat-msg${isOwn ? " own" : ""}`}>
                     {avatarSrc(pic) ? (
                       <img
                         src={avatarSrc(pic)!}
-                        alt={senderName}
+                        alt={avatarName}
                         className="msg-avatar"
                         style={{ objectFit: "cover", borderRadius: "50%" }}
                       />
                     ) : (
-                      <div className="msg-avatar">{initials(senderName)}</div>
+                      <div className="msg-avatar">{initials(avatarName)}</div>
                     )}
                     <div className="msg-body">
                       <div className="msg-meta">{senderName} · {fmtDatetime(msg.createdAt)}</div>

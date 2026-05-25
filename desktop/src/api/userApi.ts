@@ -11,6 +11,11 @@ export async function getUsers(): Promise<User[]> {
   return response.data;
 }
 
+export async function getColleagues(): Promise<Pick<User, "id" | "employeeNumber" | "name" | "role" | "category" | "profilePicture">[]> {
+  const response = await apiClient.get("/users/colleagues");
+  return response.data;
+}
+
 export async function getMe(): Promise<User> {
   const response = await apiClient.get<User>("/users/me");
   return response.data;
